@@ -22,8 +22,11 @@ Classic reading (HKDF-SHA256 of the 4-byte UID; salt `9a759cf2c4f7caff222cb9769b
 96 bytes = 16 sector keys × 6). Derive extra values from the raw blocks elsewhere (see `BambuTrayUuid.kt`).
 
 ## Key facts
+- **NFC dispatch**: `NfcAdapter.enableReaderMode` in `MainActivity` (NFC-A/B, platform NDEF check kept because
+  `TagScanner` reads stickers via the Ndef tech; no platform sound, `Haptics` vibrates instead). The manifest
+  `NDEF_DISCOVERED` filter for `web+spoolman` only covers launching from a cold sticker tap.
 - **Bambu tags**: two per spool, different UIDs, same tray UUID (block 9, 16 bytes → 32 hex chars = AMS
-  `tray_uuid`). Pixels can't read MIFARE Classic (no NXP controller); the app then falls back to the UID.
+  `tray_uuid`). Not every phone can read MIFARE Classic (it depends on the NFC controller; don't assume either way for a given Pixel). When it can't, the app falls back to the UID.
 - **Stickers**: NTAG215 with one NDEF URI record `WEB+SPOOLMAN:S-<id>`, the exact string Spoolman 0.26.1 puts in
   its own QR labels (`spoolQrCodePrintingDialog.tsx`); parsed case-insensitively, plus `…/spool/show/<id>` URLs.
 - **Spoolman extra fields** (created on start if missing): spool `bambu_tray_uuid`, `nfc_uid` (comma-separated
