@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.1.0](https://github.com/lordmuffin/spool-scanner/compare/v2.0.1...v2.1.0) (2026-10-18)
+
+
+### Features
+
+* open spools from QR labels (in-app scanner and stock-camera App Links) ([ce0f688](https://github.com/lordmuffin/spool-scanner/commit/ce0f68830a4f1eb6b8f299a97723f490cc7b7eb6))
+* open spools from QR labels (in-app scanner and stock-camera App Links) ([c19c73c](https://github.com/lordmuffin/spool-scanner/commit/c19c73cb0456a5d57b7e4059f77f4ab5ec5ae1ec))
+
 ## [2.0.1](https://github.com/lordmuffin/spool-scanner/compare/v2.0.0...v2.0.1) (2026-10-18)
 
 
