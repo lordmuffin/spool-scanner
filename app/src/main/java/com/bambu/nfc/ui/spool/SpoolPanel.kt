@@ -64,6 +64,8 @@ fun SpoolPanel(
     onWriteSticker: (Spool) -> Unit,
     modifier: Modifier = Modifier,
     justCreated: Boolean = false,
+    /** Opened from a QR code or link and Spoolman knows no NFC tag for it: offer a sticker. */
+    offerSticker: Boolean = false,
     viewModel: SpoolViewModel = hiltViewModel(key = "spool-${spool.id}"),
 ) {
     LaunchedEffect(spool) { viewModel.bind(spool) }
@@ -100,11 +102,31 @@ fun SpoolPanel(
             }
         }
 
+        if (offerSticker) {
+            Spacer(Modifier.height(12.dp))
+            Card(
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(Modifier.padding(16.dp)) {
+                    Text("No NFC sticker yet", style = MaterialTheme.typography.titleMedium)
+                    Text(
+                        "Write one so the next time you can just tap the spool.",
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    FilledTonalButton(onClick = { onWriteSticker(current) }) {
+                        Icon(Icons.Default.Nfc, null, Modifier.size(20.dp)); Spacer(Modifier.width(8.dp)); Text("Write NFC sticker")
+                    }
+                }
+            }
+        }
+
         Spacer(Modifier.height(16.dp))
         Button(onClick = { viewModel.startPrint() }, modifier = Modifier.fillMaxWidth(), enabled = !state.busy) {
             Icon(Icons.Default.Print, null, Modifier.size(20.dp)); Spacer(Modifier.width(8.dp)); Text("Print label")
         }
-        if (!isBambu) {
+        if (!isBambu && !offerSticker) {
             Spacer(Modifier.height(8.dp))
             FilledTonalButton(onClick = { onWriteSticker(current) }, modifier = Modifier.fillMaxWidth()) {
                 Icon(Icons.Default.Nfc, null, Modifier.size(20.dp)); Spacer(Modifier.width(8.dp)); Text("Write NFC sticker")

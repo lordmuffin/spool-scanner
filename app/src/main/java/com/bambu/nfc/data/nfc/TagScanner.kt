@@ -117,9 +117,9 @@ class TagScanner @Inject constructor(
         )
     }
 
-    /** Writes `WEB+SPOOLMAN:S-<id>` as the tag's only NDEF record. Never locks the tag. */
-    suspend fun writeSpoolUri(tag: Tag, spoolId: Long): Result<Unit> = withContext(Dispatchers.IO) {
-        val message = NdefMessage(NdefCodec.encodeUriMessage(SpoolUri.forSpool(spoolId)))
+    /** Writes [uri] (the spool's Spoolman link) as the tag's only NDEF record. Never locks the tag. */
+    suspend fun writeSpoolUri(tag: Tag, uri: String): Result<Unit> = withContext(Dispatchers.IO) {
+        val message = NdefMessage(NdefCodec.encodeUriMessage(uri))
         runCatching {
             val ndef = Ndef.get(tag)
             if (ndef != null) {

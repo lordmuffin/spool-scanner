@@ -1,5 +1,8 @@
 package com.bambu.nfc.domain
 
+import com.bambu.nfc.data.spoolman.ExtraKeys
+import com.bambu.nfc.data.spoolman.Filament
+import com.bambu.nfc.data.spoolman.extraValue
 import com.bambu.nfc.domain.model.FilamentData
 import com.bambu.nfc.util.toHexColorString
 
@@ -25,6 +28,8 @@ data class NewSpoolSpec(
     val bambuMaterialId: String? = null,
     val bambuTrayUuid: String? = null,
     val nfcUid: String? = null,
+    /** Use this existing Spoolman filament instead of matching/creating one (from a filament QR code). */
+    val filamentId: Long? = null,
 ) {
     companion object {
         const val BAMBU_VENDOR = "Bambu Lab"
@@ -47,6 +52,28 @@ data class NewSpoolSpec(
                 bambuMaterialId = filament.materialId.ifBlank { null },
                 bambuTrayUuid = trayUuid,
                 nfcUid = filament.tagUid,
+            )
+        }
+
+        /** Create-form prefill for a filament QR code: a new spool of an existing Spoolman filament. */
+        fun fromFilament(filament: Filament): NewSpoolSpec {
+            val hex = filament.colorHex?.removePrefix("#")?.uppercase().orEmpty()
+            val name = filament.name?.trim().orEmpty()
+            val material = filament.material?.trim().orEmpty()
+            return NewSpoolSpec(
+                vendorName = filament.vendor?.name.orEmpty(),
+                filamentName = name,
+                material = material,
+                colorHex = hex,
+                colorName = hex.takeIf { it.length == 6 }?.let { BambuColors.nameFor(it, name) },
+                diameterMm = filament.diameter,
+                densityGcm3 = filament.density,
+                netWeightG = filament.weight?.takeIf { it > 0 } ?: 1000.0,
+                spoolWeightG = filament.spoolWeight,
+                extruderTempC = filament.settingsExtruderTemp,
+                bedTempC = filament.settingsBedTemp,
+                bambuMaterialId = filament.extraValue(ExtraKeys.FILAMENT_MATERIAL_ID),
+                filamentId = filament.id,
             )
         }
 

@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.bambu.nfc.data.labelito.LabelitoClient
 import com.bambu.nfc.data.labelito.SpoolLabel
+import com.bambu.nfc.data.settings.SpoolLinks
 import com.bambu.nfc.data.spoolman.Spool
 import com.bambu.nfc.data.spoolman.SpoolmanRepository
 import com.bambu.nfc.data.spoolman.spoolmanErrorMessage
@@ -19,6 +20,7 @@ import javax.inject.Inject
 class SpoolViewModel @Inject constructor(
     private val spoolman: SpoolmanRepository,
     private val labelito: LabelitoClient,
+    private val links: SpoolLinks,
 ) : ViewModel() {
 
     data class State(
@@ -78,7 +80,7 @@ class SpoolViewModel @Inject constructor(
 
     fun startPrint() {
         val spool = _state.value.spool ?: return
-        val fields = SpoolLabel.fields(spool)
+        val fields = SpoolLabel.fields(spool, links.forSpool(spool.id))
         _print.value = PrintState.LoadingPreview
         viewModelScope.launch {
             _print.value = try {

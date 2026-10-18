@@ -20,8 +20,9 @@ class NdefCodecTest {
 
     @Test
     fun `round-trips`() {
-        val uri = SpoolUri.forSpool(123)
-        assertEquals(listOf(uri), NdefCodec.decodeUris(NdefCodec.encodeUriMessage(uri)))
+        for (uri in listOf(SpoolUri.forSpool("https://spoolman.lab.apj.dev", 123), SpoolUri.legacyForSpool(123))) {
+            assertEquals(listOf(uri), NdefCodec.decodeUris(NdefCodec.encodeUriMessage(uri)))
+        }
     }
 
     @Test

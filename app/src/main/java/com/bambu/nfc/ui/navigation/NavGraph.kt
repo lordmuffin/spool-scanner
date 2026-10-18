@@ -17,6 +17,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -30,10 +31,10 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
-import com.bambu.nfc.data.nfc.SpoolUri
 import com.bambu.nfc.ui.detail.SpoolDetailScreen
 import com.bambu.nfc.ui.detail.SpoolDetailViewModel
 import com.bambu.nfc.ui.inventory.InventoryScreen
+import com.bambu.nfc.ui.qr.QrScannerScreen
 import com.bambu.nfc.ui.inventory.InventoryViewModel
 import com.bambu.nfc.ui.scan.ScanScreen
 import com.bambu.nfc.ui.scan.ScanViewModel
@@ -56,6 +57,19 @@ fun AppNavGraph(scanViewModel: ScanViewModel) {
 
     val bottomBarScreens = listOf(Screen.Scan, Screen.Inventory, Screen.Settings)
     val showBottomBar = currentDestination?.hierarchy?.any { dest -> bottomBarScreens.any { it.route == dest.route } } == true
+
+    // A tag tap, QR code or App Link shows its result on the Scan tab, whichever tab is open.
+    LaunchedEffect(scanViewModel) {
+        scanViewModel.showScan.collect {
+            if (navController.currentDestination?.route != Screen.Scan.route) {
+                navController.navigate(Screen.Scan.route) {
+                    popUpTo(navController.graph.findStartDestination().id) { saveState = true }
+                    launchSingleTop = true
+                }
+            }
+        }
+    }
+    val qrCamera by scanViewModel.qrCamera.collectAsState()
 
     Scaffold(
         bottomBar = {
@@ -114,6 +128,9 @@ fun AppNavGraph(scanViewModel: ScanViewModel) {
         }
     }
 
+    // Drawn last so it covers the bottom bar too.
+    qrCamera?.let { QrScannerScreen(state = it, onClose = scanViewModel::closeQrScanner) }
+
     WriteStickerDialog(scanViewModel)
 }
 
@@ -130,7 +147,7 @@ private fun WriteStickerDialog(scanViewModel: ScanViewModel) {
                 when (w) {
                     is ScanViewModel.WriteState.Armed -> Text("Hold the phone against the NTAG215 sticker now.")
                     is ScanViewModel.WriteState.Writing -> { CircularProgressIndicator(); Text("Writing…") }
-                    is ScanViewModel.WriteState.Written -> Text("Done. The sticker now holds ${SpoolUri.forSpool(w.spool.id)}.")
+                    is ScanViewModel.WriteState.Written -> Text("Done. The sticker now holds ${w.uri}.")
                     is ScanViewModel.WriteState.Failed -> Text(
                         "${w.message}\n\nTap the sticker again to retry.",
                         color = MaterialTheme.colorScheme.error

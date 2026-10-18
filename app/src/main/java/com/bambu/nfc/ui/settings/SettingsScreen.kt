@@ -32,7 +32,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.bambu.nfc.BuildConfig
@@ -89,6 +92,26 @@ class SettingsViewModel @Inject constructor(
     }
 }
 
+/** Whether label QR links (scanned with the stock camera) open here, and a way to approve them. */
+@Composable
+private fun SpoolmanLinksSection() {
+    val context = LocalContext.current
+    var status by remember { mutableStateOf(AppLinkStatus.read(context)) }
+    // Re-read after returning from the system "Open by default" page.
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { status = AppLinkStatus.read(context) }
+
+    Text("Spoolman label links", style = MaterialTheme.typography.titleMedium)
+    Text(
+        "Lets the phone's camera app open a spool label's QR code straight in Spool Scanner.",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant
+    )
+    status.forEach { (host, state) ->
+        Text("$host: ${state.label}", style = MaterialTheme.typography.bodyMedium)
+    }
+    OutlinedButton(onClick = { AppLinkStatus.openSettings(context) }) { Text("Open Spoolman links in this app") }
+}
+
 @Composable
 fun SettingsScreen(viewModel: SettingsViewModel) {
     val saved by viewModel.settings.collectAsState()
@@ -138,6 +161,11 @@ fun SettingsScreen(viewModel: SettingsViewModel) {
         )
         OutlinedButton(onClick = viewModel::testLabelito, enabled = !dirty) { Text("Test printer status") }
         labelitoResult?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+
+        Spacer(Modifier.height(16.dp))
+        HorizontalDivider()
+        Spacer(Modifier.height(16.dp))
+        SpoolmanLinksSection()
 
         Spacer(Modifier.height(24.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {

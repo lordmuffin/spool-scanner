@@ -31,7 +31,7 @@ private val HEX = Regex("^#?[0-9a-fA-F]{6}$")
 @Composable
 fun CreateSpoolForm(
     initial: NewSpoolSpec,
-    fromBambuTag: Boolean,
+    prefilledFrom: String?,
     onCreate: (NewSpoolSpec) -> Unit,
     onCancel: () -> Unit,
 ) {
@@ -57,7 +57,7 @@ fun CreateSpoolForm(
     Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
         Text("New spool", style = MaterialTheme.typography.headlineSmall)
         Text(
-            if (fromBambuTag) "Not in Spoolman yet. Filled in from the Bambu tag. Check it, then create."
+            if (prefilledFrom != null) "Not in Spoolman yet. Filled in from $prefilledFrom. Check it, then create."
             else "Not in Spoolman yet. Describe the spool, then create.",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant

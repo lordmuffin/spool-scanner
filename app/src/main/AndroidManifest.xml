@@ -5,7 +5,10 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <!-- Tag-detected / read-error haptics (reader mode suppresses the platform NFC sound). -->
     <uses-permission android:name="android.permission.VIBRATE" />
+    <!-- In-app QR scanner. Optional: the app still works (NFC, links) without a camera. -->
+    <uses-permission android:name="android.permission.CAMERA" />
     <uses-feature android:name="android.hardware.nfc" android:required="true" />
+    <uses-feature android:name="android.hardware.camera.any" android:required="false" />
 
     <application
         android:name=".BambuNfcApp"
@@ -31,6 +34,44 @@
                 <action android:name="android.nfc.action.NDEF_DISCOVERED" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <data android:scheme="web+spoolman" />
+            </intent-filter>
+
+            <!-- NTAG215 stickers written by this app since QR support: an https spool link. -->
+            <intent-filter>
+                <action android:name="android.nfc.action.NDEF_DISCOVERED" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:scheme="https" />
+                <data android:host="spoolman.lab.apj.dev" />
+                <data android:host="spoolman.apj.dev" />
+                <data android:pathPrefix="/spool/show/" />
+            </intent-filter>
+
+            <!--
+              Android App Links: a spool label QR scanned with the stock camera opens the spool here.
+              Verified via https://spoolman.lab.apj.dev/.well-known/assetlinks.json (np-home-homelab).
+              spoolman.apj.dev is the promoted hostname (docs/service-promotion.md), listed now so
+              labels keep opening after a promotion. If verification can't reach the LAN-only host,
+              approve the domain in Settings → "Open Spoolman links in this app".
+            -->
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="https" />
+                <data android:host="spoolman.lab.apj.dev" />
+                <data android:host="spoolman.apj.dev" />
+                <data android:pathPrefix="/spool/show/" />
+            </intent-filter>
+
+            <!-- Plain http labels: offered in the chooser, never auto-verified. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="http" />
+                <data android:host="spoolman.lab.apj.dev" />
+                <data android:host="spoolman.apj.dev" />
+                <data android:pathPrefix="/spool/show/" />
             </intent-filter>
 
             <intent-filter>

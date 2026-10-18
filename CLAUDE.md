@@ -27,8 +27,10 @@ Classic reading (HKDF-SHA256 of the 4-byte UID; salt `9a759cf2c4f7caff222cb9769b
   `NDEF_DISCOVERED` filter for `web+spoolman` only covers launching from a cold sticker tap.
 - **Bambu tags**: two per spool, different UIDs, same tray UUID (block 9, 16 bytes → 32 hex chars = AMS
   `tray_uuid`). Not every phone can read MIFARE Classic (it depends on the NFC controller; don't assume either way for a given Pixel). When it can't, the app falls back to the UID.
-- **Stickers**: NTAG215 with one NDEF URI record `WEB+SPOOLMAN:S-<id>`, the exact string Spoolman 0.26.1 puts in
-  its own QR labels (`spoolQrCodePrintingDialog.tsx`); parsed case-insensitively, plus `…/spool/show/<id>` URLs.
+- **Codes** (`SpoolUri`, the only parser): new labels and stickers carry Spoolman's web link
+  `<Spoolman URL>/spool/show/<id>`, so the stock camera opens them (App Links). Older ones carry `WEB+SPOOLMAN:S-<id>`,
+  which still parses. `WEB+SPOOLMAN:F-<id>` and `/filament/show/<id>` are filament codes. Mirrors Spoolman's
+  `client_v2/src/lib/utils/spoolCode.ts`. QR, App Link and sticker lookups share `ScanViewModel.resolveSpool`.
 - **Spoolman extra fields** (created on start if missing): spool `bambu_tray_uuid`, `nfc_uid` (comma-separated
   UIDs); filament `bambu_material_id`. Values are JSON-encoded strings (`"\"abc\""`). Spoolman merges `extra` per
   key on PATCH. Bambuddy also writes spool `tag` (= tray UUID) and `bambu_color_name`; we match on `tag` and set

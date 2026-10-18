@@ -8,8 +8,10 @@ set its location or archive it. It also prints a spool label on a Brother QL pri
 It works with:
 - **Genuine Bambu Lab spools**: the two MIFARE Classic RFID tags on the spool are decoded (material,
   colour, weight, diameter, temperatures, tray UUID).
-- **Any other spool**: stick an **NTAG215** NFC sticker on it. The app writes the spool's Spoolman code
-  (`WEB+SPOOLMAN:S-<id>`) to the sticker and reads it back on the next tap.
+- **Any other spool**: stick an **NTAG215** NFC sticker on it. The app writes the spool's Spoolman link
+  (`https://spoolman.lab.apj.dev/spool/show/<id>`) to the sticker and reads it back on the next tap.
+- **Printed QR labels**: scan one with the in-app scanner or the phone's own camera app (see
+  [Scanning QR labels](#scanning-qr-labels)).
 
 Fork of [GraafG/bambu-spool-manager](https://github.com/GraafG/bambu-spool-manager) (MIT). Its Bambu tag
 reading is kept unchanged. Firebase, Google sign-in, the web dashboard and Fichero printing were replaced
@@ -21,13 +23,45 @@ by Spoolman and labelito.
 |---|---|
 | A Bambu tag on a spool Spoolman knows | Shows grams left, location and actions. Matches on the tray UUID, which both tags on a spool share. It also matches spools created by [Bambuddy](https://github.com/maziggy/bambuddy), which stores the same UUID in the spool's `tag` field. |
 | A Bambu tag Spoolman doesn't know | Opens a create form prefilled from the tag. On "Create", it matches or creates vendor "Bambu Lab", then matches the filament (material + colour + diameter, then Bambu material id or product name) or creates it, then creates the spool. Then it offers to print a label. |
-| A sticker written by this app | Opens the spool by the id in its URI. Spoolman's own QR payloads, including the `…/spool/show/<id>` URL form, are accepted too. |
+| A sticker written by this app | Opens the spool by the id in its URI. Both Spoolman forms are accepted: `…/spool/show/<id>` (written since QR support) and `WEB+SPOOLMAN:S-<id>` (older stickers). |
 | A blank or unknown sticker | "New spool…" (manual form) or "Link to existing spool…". Then "Write NFC sticker" writes the URI on your next tap. |
 
 Spool actions: **Weigh** (`PUT /spool/{id}/measure`, gross weight; Spoolman subtracts the empty-spool weight),
 **Use** (`PUT /spool/{id}/use`, grams), **Location**, **Archive/Unarchive**, **Print label**, and
 **Write NFC sticker** for non-Bambu spools. The Inventory tab lists every spool from Spoolman and keeps an
 offline copy, shown when Spoolman can't be reached.
+
+## Scanning QR labels
+
+A spool label's QR code opens the same spool screen an NFC tap does. There are two ways to scan it.
+
+- **Phone camera app** (Pixel Camera, Google Lens): new labels encode Spoolman's own web link,
+  `https://spoolman.lab.apj.dev/spool/show/<id>`, built from the Spoolman URL in Settings. The camera
+  offers to open it, and Android App Links send it straight to Spool Scanner. On a phone without the
+  app, the same link opens the spool's page in Spoolman's web UI.
+- **In-app scanner**: "Scan QR label" on the Scan tab opens a full-screen camera with a viewfinder,
+  torch, tap-to-focus and pinch zoom. The QR on a 62x29 mm label is about 12 mm, so hold it roughly
+  15 cm away. The first Spoolman code closes the camera with a buzz. NFC stays on, so tapping a tag
+  also works while the camera is open.
+
+| Code | Where it works | What opens |
+|---|---|---|
+| `https://<spoolman>/spool/show/<id>` (new labels and stickers) | Camera app, in-app scanner, NFC | The spool |
+| `WEB+SPOOLMAN:S-<id>` (older labels, Spoolman's default QR) | In-app scanner and NFC only. The camera app won't open it. | The spool |
+| `WEB+SPOOLMAN:F-<id>`, `https://<spoolman>/filament/show/<id>` | In-app scanner, NFC | The create form, prefilled from that filament |
+| Anything else | | "Not a Spoolman code", with the raw text and Copy. Nothing is looked up. |
+
+A spool number that Spoolman doesn't have shows "Spool #N not found in Spoolman" with Retry. When a
+QR code or link opens a spool that has no NFC tag recorded, the app offers "Write NFC sticker".
+
+**App Link verification.** Android checks `https://spoolman.lab.apj.dev/.well-known/assetlinks.json`
+(served by the homelab, signed-release fingerprint). That host only resolves on the home LAN, and
+Android's verifier may not be able to fetch it. If links open in the browser instead, go to
+**Settings → Spoolman label links → Open Spoolman links in this app**, or Android's
+Settings → Apps → Spool Scanner → Open by default, and add the link by hand. The Settings screen shows
+each host's status: verified, approved by you, or not yet. `spoolman.apj.dev`, the future promoted
+hostname, is declared too, so labels keep opening after a promotion. Debug builds are signed with the
+debug key, which assetlinks.json doesn't list, so they always need the manual approval.
 
 ### Phones that can't decode Bambu tags
 
@@ -66,11 +100,11 @@ POST /preview   →  image/png, shown for confirmation
 POST /print
 {"template": "spool-label",
  "fields": {"material": "PLA Matte", "color": "Charcoal", "vendor": "Bambu Lab",
-            "spool_id": "#12", "qr": "WEB+SPOOLMAN:S-12"}}
+            "spool_id": "#12", "qr": "https://spoolman.lab.apj.dev/spool/show/12"}}
 ```
 
-The `qr` value is the same string Spoolman 0.26.1 puts in its own label QR codes, so Spoolman's scanner
-can read it. Errors are reported explicitly:
+The `qr` value is the spool's Spoolman web link: Spoolman's own scanner reads it, the stock camera
+opens it, and it opens this app via App Links. Errors are reported explicitly:
 
 | labelito says | App shows |
 |---|---|
@@ -163,13 +197,15 @@ docker stop spoolman-test
 ```
 app/src/main/java/com/bambu/nfc/
   data/nfc/        KeyDerivation, BambuTagReader, BambuTagParser (upstream, unchanged)
-                   BambuTrayUuid, NdefCodec, SpoolUri, TagScanner (read Bambu/sticker, write sticker)
+                   BambuTrayUuid, NdefCodec, SpoolUri (all Spoolman code forms), TagScanner
+  data/qr/         QrScanner (decoded payloads → ScanViewModel), LinkIntents (App Link intents)
   data/spoolman/   Retrofit API, DTOs, ExtraValue (JSON-encoded extras), SpoolmanRepository
   data/labelito/   LabelitoClient (preview/print + error mapping), SpoolLabel (template fields)
   data/settings/   SettingsStore (EncryptedSharedPreferences)
   data/local/      Room offline cache of the last spool list
   domain/          SpoolMatcher, NewSpoolSpec, BambuColors
-  ui/              scan, spool (panel + actions + print dialog), inventory, detail, settings
+  ui/              scan, qr (camera screen, ML Kit analyzer), spool (panel + actions + print dialog),
+                   inventory, detail, settings (incl. App Link status)
 ```
 
 ### Dependencies
@@ -181,6 +217,8 @@ app/src/main/java/com/bambu/nfc/
 | kotlinx.serialization | JSON DTOs and JSON-encoded extra-field values |
 | androidx.security:security-crypto | EncryptedSharedPreferences for the labelito token |
 | Room | Offline cache of the spool list |
+| CameraX (camera2, lifecycle, view) | In-app QR scanner preview, tap-to-focus, pinch zoom, torch |
+| ML Kit barcode-scanning (bundled model) | QR decoding on the device, with no Play Services download |
 | Hilt, Compose, Navigation | As upstream |
 
 ## NFC tag format (Bambu Lab, MIFARE Classic 1K)

@@ -1,6 +1,5 @@
 package com.bambu.nfc.data.labelito
 
-import com.bambu.nfc.data.nfc.SpoolUri
 import com.bambu.nfc.data.spoolman.ExtraKeys
 import com.bambu.nfc.data.spoolman.Spool
 import com.bambu.nfc.data.spoolman.extraValue
@@ -9,14 +8,15 @@ import com.bambu.nfc.domain.BambuColors
 /** Fields for labelito's `spool-label` template (defined in np-home-homelab). */
 object SpoolLabel {
 
-    fun fields(spool: Spool): Map<String, String> {
+    /** [spoolLink] is the QR payload, normally `SpoolLinks.forSpool(spool.id)`. */
+    fun fields(spool: Spool, spoolLink: String): Map<String, String> {
         val f = spool.filament
         return mapOf(
             "material" to materialLine(f.material, f.name),
             "color" to colorLine(spool),
             "vendor" to (f.vendor?.name ?: ""),
             "spool_id" to "#${spool.id}",
-            "qr" to SpoolUri.forSpool(spool.id),
+            "qr" to spoolLink,
         )
     }
 
