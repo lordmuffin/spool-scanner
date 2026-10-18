@@ -29,13 +29,17 @@ Spool actions: **Weigh** (`PUT /spool/{id}/measure`, gross weight; Spoolman subt
 **Write NFC sticker** for non-Bambu spools. The Inventory tab lists every spool from Spoolman and keeps an
 offline copy, shown when Spoolman can't be reached.
 
-### Pixel phones and Bambu tags
+### Phones that can't decode Bambu tags
 
-Reading MIFARE Classic needs an NXP NFC controller, and Pixels don't have one. On a Pixel a Bambu tag
-shows up as "Bambu tag this phone can't decode". You can still create the spool by hand or link the
-tag to an existing spool. That records the tag's UID in the spool's `nfc_uid` field, so later taps find the spool.
-When a phone that *can* decode Bambu tags creates the spool, the UID is recorded automatically.
+Bambu tags are MIFARE Classic, and not every phone's NFC stack can read them. Support depends on the
+NFC controller, and reports differ between Pixel models. On a phone that can't, a Bambu tag shows
+as "Bambu tag this phone can't decode". You can still create the spool by hand or link the tag to an
+existing spool. That records the tag's UID in the spool's `nfc_uid` field, so later taps find the spool.
+When a phone that *can* decode Bambu tags scans the spool, it fills in the tray UUID.
 NTAG215 stickers work on every NFC phone.
+
+To see what a phone reports for a tag, run `adb logcat -s TagScanner MainActivity`. It logs the UID,
+SAK, ATQA and tech list for every tap.
 
 ## Spoolman setup
 

@@ -1,5 +1,9 @@
 package com.bambu.nfc.ui.scan
 
+import android.content.ActivityNotFoundException
+import android.content.Context
+import android.content.Intent
+import android.provider.Settings
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -40,6 +44,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.bambu.nfc.data.nfc.TagRead
@@ -51,6 +56,7 @@ import com.bambu.nfc.ui.spool.fmt
 fun ScanScreen(viewModel: ScanViewModel) {
     val uiState by viewModel.uiState.collectAsState()
     val warning by viewModel.setupWarning.collectAsState()
+    val nfcStatus by viewModel.nfcStatus.collectAsState()
     val centered = uiState is ScanViewModel.UiState.Ready || uiState is ScanViewModel.UiState.Busy
 
     Column(
@@ -61,6 +67,7 @@ fun ScanScreen(viewModel: ScanViewModel) {
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = if (centered) Arrangement.Center else Arrangement.Top
     ) {
+        nfcStatus.banner()?.let { NfcBannerCard(it) }
         when (val state = uiState) {
             ScanViewModel.UiState.Ready -> {
                 if (centered) Spacer(Modifier.height(96.dp))
@@ -166,6 +173,35 @@ fun Spool.matches(query: String): Boolean {
         "#$id", filament.name, filament.material, filament.vendor?.name, filament.colorHex, location
     ).joinToString(" ")
     return query.trim().split(Regex("\\s+")).all { haystack.contains(it, ignoreCase = true) }
+}
+
+@Composable
+private fun NfcBannerCard(banner: NfcBanner) {
+    val context = LocalContext.current
+    Card(
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(Modifier.padding(16.dp)) {
+            Text(banner.title, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onErrorContainer)
+            Text(banner.message, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onErrorContainer)
+            if (banner.showSettingsButton) {
+                Spacer(Modifier.height(8.dp))
+                Button(onClick = { openNfcSettings(context) }) { Text("Open NFC settings") }
+            }
+        }
+    }
+    Spacer(Modifier.height(16.dp))
+}
+
+/** NFC settings screen, or the wireless settings screen on devices without a dedicated one. */
+private fun openNfcSettings(context: Context) {
+    val nfc = Intent(Settings.ACTION_NFC_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    try {
+        context.startActivity(nfc)
+    } catch (e: ActivityNotFoundException) {
+        context.startActivity(Intent(Settings.ACTION_WIRELESS_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+    }
 }
 
 @Composable

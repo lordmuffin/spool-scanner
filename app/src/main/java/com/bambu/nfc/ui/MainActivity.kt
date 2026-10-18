@@ -1,32 +1,74 @@
 package com.bambu.nfc.ui
 
-import android.app.PendingIntent
+import android.content.BroadcastReceiver
+import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.nfc.NfcAdapter
 import android.nfc.Tag
 import android.os.Build
 import android.os.Bundle
+import android.util.Log
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
+import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
 import com.bambu.nfc.ui.navigation.AppNavGraph
+import com.bambu.nfc.ui.scan.NfcStatus
 import com.bambu.nfc.ui.scan.ScanViewModel
 import com.bambu.nfc.ui.theme.BambuNfcTheme
 import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.coroutines.launch
 
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
 
+    private companion object {
+        const val TAG = "MainActivity"
+
+        // Bambu tags are MIFARE Classic and NTAG215 stickers are NTAG, both NFC-A. NFC-B costs
+        // nothing. The platform NDEF check stays on (no FLAG_READER_SKIP_NDEF_CHECK) because
+        // TagScanner reads stickers through the Ndef tech, which that check populates.
+        // FLAG_READER_NO_PLATFORM_SOUNDS: we vibrate instead (Haptics).
+        const val READER_FLAGS = NfcAdapter.FLAG_READER_NFC_A or
+            NfcAdapter.FLAG_READER_NFC_B or
+            NfcAdapter.FLAG_READER_NO_PLATFORM_SOUNDS
+
+        const val PRESENCE_CHECK_DELAY_MS = 250
+    }
+
     private var nfcAdapter: NfcAdapter? = null
     private val scanViewModel: ScanViewModel by viewModels()
+    private lateinit var haptics: Haptics
+
+    // Runs on a binder thread: vibrate right away, then hand the tag to the main thread.
+    private val readerCallback = NfcAdapter.ReaderCallback { tag ->
+        Log.d(TAG, "Reader mode delivered tag: techs=${tag.techList.joinToString { it.substringAfterLast('.') }}")
+        haptics.tagDetected()
+        runOnUiThread { scanViewModel.onTagDiscovered(tag) }
+    }
+
+    // NFC toggled from the quick-settings shade doesn't pause the activity, so listen as well.
+    private val adapterStateReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            val state = intent.getIntExtra(NfcAdapter.EXTRA_ADAPTER_STATE, NfcAdapter.STATE_OFF)
+            if (state == NfcAdapter.STATE_ON || state == NfcAdapter.STATE_OFF) {
+                refreshNfcStatus()
+                if (state == NfcAdapter.STATE_ON) enableReaderMode()
+            }
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
+        haptics = Haptics(this)
         nfcAdapter = NfcAdapter.getDefaultAdapter(this)
         if (nfcAdapter == null) {
             Toast.makeText(this, "This device does not support NFC", Toast.LENGTH_LONG).show()
@@ -38,18 +80,31 @@ class MainActivity : ComponentActivity() {
             }
         }
 
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                scanViewModel.tagErrors.collect { haptics.error() }
+            }
+        }
+
         // A sticker tapped while the app was closed launches it via NDEF_DISCOVERED (web+spoolman scheme).
         if (savedInstanceState == null) handleIntent(intent)
     }
 
     override fun onResume() {
         super.onResume()
-        enableNfcForegroundDispatch()
+        refreshNfcStatus()
+        ContextCompat.registerReceiver(
+            this, adapterStateReceiver,
+            IntentFilter(NfcAdapter.ACTION_ADAPTER_STATE_CHANGED),
+            ContextCompat.RECEIVER_NOT_EXPORTED,
+        )
+        enableReaderMode()
     }
 
     override fun onPause() {
         super.onPause()
-        nfcAdapter?.disableForegroundDispatch(this)
+        runCatching { unregisterReceiver(adapterStateReceiver) }
+        runCatching { nfcAdapter?.disableReaderMode(this) }
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -57,6 +112,26 @@ class MainActivity : ComponentActivity() {
         handleIntent(intent)
     }
 
+    private fun refreshNfcStatus() {
+        val adapter = nfcAdapter
+        val status = NfcStatus.of(hasAdapter = adapter != null, isEnabled = adapter?.isEnabled == true)
+        Log.d(TAG, "NFC status: $status")
+        scanViewModel.onNfcStatus(status)
+    }
+
+    private fun enableReaderMode() {
+        val adapter = nfcAdapter ?: return
+        if (!adapter.isEnabled) return // re-enabled from adapterStateReceiver when NFC comes on
+        val extras = Bundle().apply { putInt(NfcAdapter.EXTRA_READER_PRESENCE_CHECK_DELAY, PRESENCE_CHECK_DELAY_MS) }
+        try {
+            adapter.enableReaderMode(this, readerCallback, READER_FLAGS, extras)
+            Log.d(TAG, "Reader mode enabled")
+        } catch (e: Exception) {
+            Log.w(TAG, "enableReaderMode failed: ${e.message}")
+        }
+    }
+
+    /** Only the cold-start / background NDEF_DISCOVERED launch arrives as an intent now. */
     private fun handleIntent(intent: Intent) {
         if (intent.action != NfcAdapter.ACTION_TECH_DISCOVERED &&
             intent.action != NfcAdapter.ACTION_TAG_DISCOVERED &&
@@ -68,27 +143,7 @@ class MainActivity : ComponentActivity() {
             @Suppress("DEPRECATION")
             intent.getParcelableExtra(NfcAdapter.EXTRA_TAG)
         }
+        Log.d(TAG, "Tag delivered by intent ${intent.action}: ${tag != null}")
         tag?.let(scanViewModel::onTagDiscovered)
-    }
-
-    private fun enableNfcForegroundDispatch() {
-        val adapter = nfcAdapter ?: return
-        val pendingIntent = PendingIntent.getActivity(
-            this, 0,
-            Intent(this, javaClass).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
-            PendingIntent.FLAG_MUTABLE
-        )
-        // Bambu tags are MIFARE Classic; NTAG215 stickers are NfcA + Ndef (or NdefFormatable when blank).
-        val techList = arrayOf(
-            arrayOf("android.nfc.tech.MifareClassic"),
-            arrayOf("android.nfc.tech.NfcA"),
-            arrayOf("android.nfc.tech.Ndef"),
-            arrayOf("android.nfc.tech.NdefFormatable"),
-        )
-        val filters = arrayOf(
-            IntentFilter(NfcAdapter.ACTION_TECH_DISCOVERED),
-            IntentFilter(NfcAdapter.ACTION_NDEF_DISCOVERED).apply { addDataScheme("web+spoolman") },
-        )
-        adapter.enableForegroundDispatch(this, pendingIntent, filters, techList)
     }
 }

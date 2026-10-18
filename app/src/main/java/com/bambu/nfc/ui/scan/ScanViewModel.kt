@@ -11,7 +11,9 @@ import com.bambu.nfc.data.spoolman.spoolmanErrorMessage
 import com.bambu.nfc.domain.NewSpoolSpec
 import com.bambu.nfc.util.toHex
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -54,8 +56,19 @@ class ScanViewModel @Inject constructor(
     private val _setupWarning = MutableStateFlow<String?>(null)
     val setupWarning: StateFlow<String?> = _setupWarning
 
+    private val _nfcStatus = MutableStateFlow(NfcStatus.Enabled)
+    val nfcStatus: StateFlow<NfcStatus> = _nfcStatus
+
+    /** Fires once per tap that ends in a tag read/write failure (MainActivity vibrates). */
+    private val _tagErrors = MutableSharedFlow<Unit>(extraBufferCapacity = 4)
+    val tagErrors: SharedFlow<Unit> = _tagErrors
+
     init {
         ensureExtraFields()
+    }
+
+    fun onNfcStatus(status: NfcStatus) {
+        _nfcStatus.value = status
     }
 
     fun ensureExtraFields() {
@@ -81,8 +94,10 @@ class ScanViewModel @Inject constructor(
                 scanner.read(tag)
             } catch (e: Exception) {
                 _uiState.value = UiState.Error("Couldn't read the tag: ${e.message}")
+                _tagErrors.tryEmit(Unit)
                 return@launch
             }
+            if (read is TagRead.Unreadable) _tagErrors.tryEmit(Unit)
             _uiState.value = UiState.Busy("Looking it up in Spoolman…")
             _uiState.value = try {
                 lookup(read)
@@ -180,7 +195,10 @@ class ScanViewModel @Inject constructor(
                     runCatching { spoolman.linkNfcUid(spool.id, tag.id.toHex()) }
                     WriteState.Written(spool)
                 },
-                onFailure = { WriteState.Failed(spool, it.message ?: "Write failed") },
+                onFailure = {
+                    _tagErrors.tryEmit(Unit)
+                    WriteState.Failed(spool, it.message ?: "Write failed")
+                },
             )
         }
     }
