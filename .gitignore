@@ -25,10 +25,12 @@ local.properties
 .idea/
 .DS_Store
 
-# Signing
+# Signing: never commit; CI uses the KEYSTORE_BASE64 secret, local builds `source .signing.env`
 *.jks
 *.keystore
+*.p12
 keystore.properties
+.signing.env
 
 # Local configuration
 local.properties
