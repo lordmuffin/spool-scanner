@@ -97,25 +97,43 @@ installs them and keeps them updated:
 
 ## Releasing
 
-`.github/workflows/release.yml` runs on a `v*` tag. It runs the unit tests, builds a release APK signed with
-our own keystore, and attaches `spool-scanner-<tag>.apk` to a GitHub Release.
+Releases work the same way as in [jarvis-voice](https://github.com/lordmuffin/jarvis-voice):
 
-One-time keystore setup:
+1. Merge PRs to `main` using [Conventional Commits](https://www.conventionalcommits.org/) (`feat:`, `fix:`, `feat!:`).
+2. `release-please.yml` keeps a release PR open that bumps `version.txt` and `CHANGELOG.md`.
+   The APK's `versionName` and `versionCode` are read from `version.txt` (`2.1.3` → code `20103`).
+3. Merging the release PR tags `vX.Y.Z`. `release.yml` verifies the keystore, runs the unit tests,
+   builds `spool-scanner-vX.Y.Z.apk` signed with our key, and attaches it to the GitHub Release.
+   Obtainium picks it up from there. A Gotify push follows when the notify secrets are set.
+
+Tags created with the default `GITHUB_TOKEN` don't trigger other workflows. Without a
+`RELEASE_PLEASE_TOKEN` secret, run **Release Signed APK** by hand (Actions → Run workflow → tag `vX.Y.Z`).
+It attaches the APK to the existing release.
+
+### Repo secrets
+
+| Secret | What |
+|---|---|
+| `KEYSTORE_BASE64` | base64 of the PKCS12 release keystore |
+| `KEYSTORE_PASSWORD` | Store password. PKCS12 has no separate key password. |
+| `KEY_PASSWORD` | Same value as `KEYSTORE_PASSWORD` |
+| `KEY_ALIAS` | `spool-scanner` |
+| `RELEASE_PLEASE_TOKEN` | Optional. A fine-grained PAT (contents + pull requests: write) so release tags trigger `release.yml`. |
+| `NB_SETUP_KEY`, `GOTIFY_URL`, `GOTIFY_TOKEN` | Optional. Gotify notification over NetBird (see `notify-gotify.yml`). |
+
+The keystore lives at `~/.config/spool-scanner/spool-scanner-release.jks`. Its password is in
+`~/.config/spool-scanner/signing.env`, and `.signing.env` in the repo root is a gitignored symlink to it.
+**Back both up to 1Password.** Android refuses updates signed with a different key, so losing the
+keystore means uninstalling and reinstalling the app.
+
+Local signed build:
 
 ```bash
-keytool -genkeypair -v -keystore spool-scanner.jks -alias spool-scanner -keyalg RSA -keysize 4096 -validity 10000
-base64 -w0 spool-scanner.jks > spool-scanner.jks.b64
+set -a; source .signing.env; set +a
+./gradlew assembleRelease   # app/build/outputs/apk/release/app-release.apk
 ```
 
-Add repo secrets `KEYSTORE_BASE64` (contents of the `.b64` file), `KEYSTORE_PASSWORD`, `KEY_ALIAS`
-(`spool-scanner`) and `KEY_PASSWORD`. Keep the keystore safe (e.g. in 1Password). Android refuses
-updates signed with a different key.
-
-To release, bump `versionCode`/`versionName` in `app/build.gradle.kts`, then:
-
-```bash
-git tag v2.0.0 && git push origin v2.0.0
-```
+Without `KEYSTORE_PATH` set, `assembleRelease` falls back to debug signing.
 
 ## Development
 

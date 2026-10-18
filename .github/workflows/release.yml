@@ -1,73 +1,116 @@
-name: Build & Release APK
+name: Release Signed APK
 
-# Push a tag like v2.0.0 to publish a signed APK as a GitHub Release asset.
-# Obtainium (see README) watches this repo's releases and installs/updates the APK.
+# A vX.Y.Z tag (normally created by release-please) builds an APK signed with our own
+# keystore and attaches it to the GitHub Release, where Obtainium picks it up (see README).
+#
+# Secrets (repository settings -> Secrets and variables -> Actions):
+#   KEYSTORE_BASE64    base64 of the PKCS12 release keystore
+#   KEYSTORE_PASSWORD  store password (PKCS12: also protects the key)
+#   KEY_ALIAS          key alias in the keystore
+#   KEY_PASSWORD       same as KEYSTORE_PASSWORD; only used as a fallback by the verify step
+
 on:
   push:
     tags:
       - 'v*'
+  # Manual build for an existing tag. Tags created by release-please with the
+  # default GITHUB_TOKEN do not fire the push trigger above.
   workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing release tag to build (e.g. v2.0.0)'
+        required: true
+        type: string
 
 jobs:
   release:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    env:
+      RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
 
     steps:
-      - uses: actions/checkout@v7
+      - name: Validate tag
+        run: |
+          case "$RELEASE_TAG" in
+            v*) ;;
+            *) echo "::error::Tag '$RELEASE_TAG' must match v*"; exit 1 ;;
+          esac
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ format('refs/tags/{0}', env.RELEASE_TAG) }}
 
       - name: Set up JDK 17
-        uses: actions/setup-java@v5
+        uses: actions/setup-java@v4
         with:
           java-version: '17'
           distribution: 'temurin'
 
       - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v6
+        uses: gradle/actions/setup-gradle@v4
 
-      - name: Unit tests
-        run: ./gradlew testDebugUnitTest
-
-      # Repo secrets (Settings → Secrets and variables → Actions):
-      #   KEYSTORE_BASE64   base64 of the release .jks
-      #   KEYSTORE_PASSWORD, KEY_ALIAS, KEY_PASSWORD
       - name: Decode keystore
         env:
-          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_B64: ${{ secrets.KEYSTORE_BASE64 }}
         run: |
-          if [ -z "$KEYSTORE_BASE64" ]; then echo "::error::KEYSTORE_BASE64 secret is not set"; exit 1; fi
-          printenv KEYSTORE_BASE64 | base64 -d > release-keystore.jks
+          if [ -z "$KEYSTORE_B64" ]; then echo "::error::KEYSTORE_BASE64 secret is not set"; exit 1; fi
+          printf '%s' "$KEYSTORE_B64" | tr -d '[:space:]' | base64 --decode > app/keystore.jks
 
-      - name: Create keystore.properties
+      - name: Verify keystore
         env:
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
-          {
-            echo "storeFile=../release-keystore.jks"
-            echo "storePassword=$KEYSTORE_PASSWORD"
-            echo "keyAlias=$KEY_ALIAS"
-            echo "keyPassword=$KEY_PASSWORD"
-          } > keystore.properties
+          echo "KEYSTORE_PASSWORD length: ${#KEYSTORE_PASSWORD}"
+          echo "KEY_PASSWORD length: ${#KEY_PASSWORD}"
+          keytool -list -keystore app/keystore.jks -storepass "$KEYSTORE_PASSWORD" -alias "$KEY_ALIAS" -noprompt
+          keytool -certreq -keystore app/keystore.jks -storepass "$KEYSTORE_PASSWORD" -alias "$KEY_ALIAS" -keypass "$KEY_PASSWORD" -file /dev/null || \
+            keytool -certreq -keystore app/keystore.jks -storepass "$KEYSTORE_PASSWORD" -alias "$KEY_ALIAS" -keypass "$KEYSTORE_PASSWORD" -file /dev/null
 
-      - name: Build release APK
-        run: ./gradlew assembleRelease
+      - name: Unit tests
+        run: ./gradlew testDebugUnitTest --no-daemon
 
-      - name: Get version name
-        id: version
-        run: |
-          VERSION=$(grep 'versionName' app/build.gradle.kts | head -1 | sed 's/.*"\(.*\)".*/\1/')
-          echo "name=v$VERSION" >> "$GITHUB_OUTPUT"
+      - name: Build signed release APK
+        env:
+          KEYSTORE_PATH: keystore.jks # relative to app/
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+        run: ./gradlew assembleRelease --no-daemon
 
       - name: Rename APK
-        run: cp app/build/outputs/apk/release/app-release.apk "spool-scanner-${{ github.ref_type == 'tag' && github.ref_name || steps.version.outputs.name }}.apk"
+        id: apk
+        run: |
+          version="${RELEASE_TAG#v}"
+          mv app/build/outputs/apk/release/app-release.apk \
+             "app/build/outputs/apk/release/spool-scanner-v${version}.apk"
+          echo "path=app/build/outputs/apk/release/spool-scanner-v${version}.apk" >> "$GITHUB_OUTPUT"
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v3
+        if: github.event_name == 'push'
+        uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.ref_type == 'tag' && github.ref_name || steps.version.outputs.name }}
-          name: Spool Scanner ${{ github.ref_type == 'tag' && github.ref_name || steps.version.outputs.name }}
+          name: ${{ github.ref_name }}
           generate_release_notes: true
-          files: spool-scanner-*.apk
+          files: ${{ steps.apk.outputs.path }}
+
+      # Manual run: the release already exists (made by release-please), so only
+      # attach the APK and leave its name and notes alone.
+      - name: Attach APK to existing release
+        if: github.event_name == 'workflow_dispatch'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          files: ${{ steps.apk.outputs.path }}
+
+  notify:
+    needs: release
+    uses: ./.github/workflows/notify-gotify.yml
+    with:
+      title: "spool-scanner ${{ inputs.tag || github.ref_name }} released"
+      message: "Signed APK attached to the GitHub Release."
+      priority: 5
+      url: ${{ github.server_url }}/${{ github.repository }}/releases/tag/${{ inputs.tag || github.ref_name }}
+    secrets: inherit

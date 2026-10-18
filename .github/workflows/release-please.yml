@@ -1,0 +1,24 @@
+name: Release Please
+
+# Keeps a release PR open that bumps version.txt and CHANGELOG.md from Conventional Commits.
+# Merging it tags vX.Y.Z, which triggers release.yml (signed APK → GitHub Release → Obtainium).
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: googleapis/release-please-action@v4
+        with:
+          # Tags/releases created with GITHUB_TOKEN do not trigger the tag-push workflow
+          # (release.yml). Use a PAT when available; otherwise run release.yml by hand for the tag.
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN || secrets.GITHUB_TOKEN }}
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json

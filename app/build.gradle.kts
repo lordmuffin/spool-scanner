@@ -7,16 +7,13 @@ plugins {
     alias(libs.plugins.hilt)
 }
 
-import java.io.FileInputStream
-import java.util.Properties
-
-// Release signing comes from keystore.properties, which CI writes from repo secrets
-// (see .github/workflows/release.yml). Without it, release builds are left unsigned.
-val keystorePropertiesFile = rootProject.file("keystore.properties")
-val keystoreProperties = Properties()
-if (keystorePropertiesFile.exists()) {
-    keystoreProperties.load(FileInputStream(keystorePropertiesFile))
-}
+// release-please bumps version.txt on every release; the APK's versionName and versionCode
+// follow it so the installed app reports its release (same scheme as jarvis-voice).
+val appVersion: String = providers
+    .fileContents(rootProject.layout.projectDirectory.file("version.txt"))
+    .asText.get().trim()
+val appVersionCode: Int = appVersion.split(".").map(String::toInt)
+    .let { (major, minor, patch) -> major * 10_000 + minor * 100 + patch }
 
 android {
     namespace = "com.bambu.nfc"
@@ -27,18 +24,19 @@ android {
         applicationId = "dev.apj.spoolscanner"
         minSdk = 24
         targetSdk = 36
-        versionCode = 3
-        versionName = "2.0.0"
+        versionCode = appVersionCode
+        versionName = appVersion
     }
 
+    // Release signing comes from the environment: CI decodes the KEYSTORE_BASE64 secret
+    // (.github/workflows/release.yml); locally, `source .signing.env` (see README).
     signingConfigs {
-        if (keystorePropertiesFile.exists()) {
-            create("release") {
-                storeFile = file(keystoreProperties.getProperty("storeFile"))
-                storePassword = keystoreProperties.getProperty("storePassword")
-                keyAlias = keystoreProperties.getProperty("keyAlias")
-                keyPassword = keystoreProperties.getProperty("keyPassword")
-            }
+        create("release") {
+            storeFile = System.getenv("KEYSTORE_PATH")?.let { file(it) }
+            storePassword = System.getenv("KEYSTORE_PASSWORD")
+            keyAlias = System.getenv("KEY_ALIAS")
+            // PKCS12 keystores have no separate key password: the store password protects the key.
+            keyPassword = System.getenv("KEYSTORE_PASSWORD")
         }
     }
 
@@ -46,7 +44,13 @@ android {
         release {
             isMinifyEnabled = true
             isShrinkResources = true
-            signingConfig = signingConfigs.findByName("release")
+            // Without a keystore, release builds are debug-signed: fine for trying R8 locally,
+            // but they can't update an install of the real release.
+            signingConfig = if (System.getenv("KEYSTORE_PATH") != null) {
+                signingConfigs.getByName("release")
+            } else {
+                signingConfigs.getByName("debug")
+            }
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
