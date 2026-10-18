@@ -25,9 +25,6 @@ local.properties
 .idea/
 .DS_Store
 
-# Firebase config (contains API keys - each dev needs their own)
-app/google-services.json
-
 # Signing
 *.jks
 *.keystore
@@ -38,15 +35,6 @@ local.properties
 
 # Kotlin compilation cache
 .kotlin/
-
-# Web
-web/node_modules/
-
-# Fichero printer library (clone separately)
-lib/
-
-# Firebase user exports (contains PII)
-web/users.json
 
 # Blog post materials
 blogpost/

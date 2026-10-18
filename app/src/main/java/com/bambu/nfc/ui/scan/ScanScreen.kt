@@ -6,8 +6,8 @@ import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -15,94 +15,171 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Nfc
-import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import com.bambu.nfc.domain.model.FilamentData
-import com.bambu.nfc.domain.model.Spool
-import com.bambu.nfc.domain.model.SpoolStatus
-import com.bambu.nfc.ui.components.ColorSwatch
-import com.bambu.nfc.ui.components.TemperatureInfo
-import com.bambu.nfc.util.toHexColorString
+import com.bambu.nfc.data.nfc.TagRead
+import com.bambu.nfc.data.spoolman.Spool
+import com.bambu.nfc.ui.spool.SpoolPanel
+import com.bambu.nfc.ui.spool.fmt
 
 @Composable
 fun ScanScreen(viewModel: ScanViewModel) {
     val uiState by viewModel.uiState.collectAsState()
+    val warning by viewModel.setupWarning.collectAsState()
+    val centered = uiState is ScanViewModel.UiState.Ready || uiState is ScanViewModel.UiState.Busy
 
-    Box(modifier = Modifier.fillMaxSize()) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(32.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center
-        ) {
-            when (uiState) {
-                is ScanViewModel.UiState.Ready -> ScanPrompt()
-                is ScanViewModel.UiState.Scanning -> ScanningIndicator()
-                is ScanViewModel.UiState.Error -> {
-                    ScanPrompt()
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = if (centered) Arrangement.Center else Arrangement.Top
+    ) {
+        when (val state = uiState) {
+            ScanViewModel.UiState.Ready -> {
+                if (centered) Spacer(Modifier.height(96.dp))
+                ScanPrompt()
+                warning?.let {
                     Spacer(Modifier.height(24.dp))
-                    Card(
-                        colors = CardDefaults.cardColors(
-                            containerColor = MaterialTheme.colorScheme.errorContainer
-                        )
-                    ) {
-                        Text(
-                            text = (uiState as ScanViewModel.UiState.Error).message,
-                            color = MaterialTheme.colorScheme.onErrorContainer,
-                            modifier = Modifier.padding(16.dp),
-                            textAlign = TextAlign.Center
-                        )
-                    }
+                    ErrorCard(it)
+                    TextButton(onClick = viewModel::ensureExtraFields) { Text("Retry") }
                 }
-                is ScanViewModel.UiState.ChooseAction -> ScanPrompt()
-                is ScanViewModel.UiState.Done -> ScanPrompt()
+            }
+            is ScanViewModel.UiState.Busy -> {
+                Spacer(Modifier.height(96.dp))
+                CircularProgressIndicator(Modifier.size(64.dp))
+                Spacer(Modifier.height(24.dp))
+                Text(state.message, style = MaterialTheme.typography.titleLarge)
+            }
+            is ScanViewModel.UiState.Known -> {
+                SpoolPanel(spool = state.spool, justCreated = state.justCreated, onWriteSticker = viewModel::armWrite)
+                Spacer(Modifier.height(16.dp))
+                TextButton(onClick = viewModel::dismiss) { Text("Done") }
+            }
+            is ScanViewModel.UiState.Create -> CreateSpoolForm(
+                initial = state.spec,
+                fromBambuTag = state.fromBambuTag,
+                onCreate = viewModel::createSpool,
+                onCancel = viewModel::dismiss,
+            )
+            is ScanViewModel.UiState.Unlinked -> Unlinked(state, viewModel)
+            is ScanViewModel.UiState.PickSpool -> SpoolPicker(
+                spools = state.spools,
+                onPick = { viewModel.link(state.read, it) },
+                onCancel = viewModel::dismiss,
+            )
+            is ScanViewModel.UiState.Error -> {
+                Spacer(Modifier.height(48.dp))
+                ScanPrompt()
+                Spacer(Modifier.height(24.dp))
+                ErrorCard(state.message)
+                TextButton(onClick = viewModel::dismiss) { Text("OK") }
             }
         }
+    }
+}
 
-        val state = uiState
-        if (state is ScanViewModel.UiState.ChooseAction) {
-            ActionChooserSheet(
-                filament = state.filament,
-                existingSpool = state.existingSpool,
-                viewModel = viewModel,
-                onDismiss = { viewModel.dismiss() }
-            )
-        }
+@Composable
+private fun Unlinked(state: ScanViewModel.UiState.Unlinked, viewModel: ScanViewModel) {
+    val read = state.read
+    Icon(Icons.Default.Nfc, null, Modifier.size(64.dp), tint = MaterialTheme.colorScheme.primary)
+    Spacer(Modifier.height(12.dp))
+    Text(
+        when {
+            state.missingSpoolId != null -> "Sticker points at spool #${state.missingSpoolId}, which isn't in Spoolman"
+            read is TagRead.Unreadable -> "Bambu tag this phone can't decode"
+            else -> "Sticker isn't linked to a spool"
+        },
+        style = MaterialTheme.typography.titleLarge,
+        textAlign = TextAlign.Center
+    )
+    Spacer(Modifier.height(8.dp))
+    Text(
+        if (read is TagRead.Unreadable) read.reason
+        else "Create a new spool for it, or link it to a spool that's already in Spoolman.",
+        style = MaterialTheme.typography.bodyMedium,
+        textAlign = TextAlign.Center,
+        color = MaterialTheme.colorScheme.onSurfaceVariant
+    )
+    Text("Tag UID ${read.uid}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    Spacer(Modifier.height(16.dp))
+    Button(onClick = { viewModel.startCreate(read) }, modifier = Modifier.fillMaxWidth()) { Text("New spool…") }
+    Spacer(Modifier.height(8.dp))
+    OutlinedButton(onClick = { viewModel.startLink(read) }, modifier = Modifier.fillMaxWidth()) { Text("Link to existing spool…") }
+    TextButton(onClick = viewModel::dismiss) { Text("Cancel") }
+}
 
-        if (state is ScanViewModel.UiState.Done) {
-            DoneSheet(
-                spool = state.spool,
-                message = state.message,
-                onDismiss = { viewModel.dismiss() }
-            )
-        }
+@Composable
+fun SpoolPicker(spools: List<Spool>, onPick: (Spool) -> Unit, onCancel: () -> Unit) {
+    var query by remember { mutableStateOf("") }
+    Text("Pick the spool", style = MaterialTheme.typography.headlineSmall)
+    Spacer(Modifier.height(8.dp))
+    OutlinedTextField(
+        value = query, onValueChange = { query = it }, label = { Text("Search") }, singleLine = true,
+        modifier = Modifier.fillMaxWidth()
+    )
+    val shown = spools.filter { it.matches(query) }
+    if (shown.isEmpty()) Text("No spools match.", modifier = Modifier.padding(16.dp))
+    shown.forEach { spool ->
+        ListItem(
+            headlineContent = { Text("#${spool.id}  ${spool.filament.name ?: spool.filament.material ?: ""}") },
+            supportingContent = {
+                Text(listOfNotNull(spool.filament.vendor?.name, spool.filament.colorHex?.let { "#$it" },
+                    spool.remainingWeight?.let { "${it.fmt()} g" }, spool.location).joinToString("  |  "))
+            },
+            modifier = Modifier.clickable { onPick(spool) }
+        )
+        HorizontalDivider()
+    }
+    TextButton(onClick = onCancel) { Text("Cancel") }
+}
+
+fun Spool.matches(query: String): Boolean {
+    if (query.isBlank()) return true
+    val haystack = listOfNotNull(
+        "#$id", filament.name, filament.material, filament.vendor?.name, filament.colorHex, location
+    ).joinToString(" ")
+    return query.trim().split(Regex("\\s+")).all { haystack.contains(it, ignoreCase = true) }
+}
+
+@Composable
+private fun ErrorCard(message: String) {
+    Card(
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Text(
+            text = message,
+            color = MaterialTheme.colorScheme.onErrorContainer,
+            modifier = Modifier.padding(16.dp),
+            textAlign = TextAlign.Center
+        )
     }
 }
 
@@ -112,247 +189,22 @@ private fun ScanPrompt() {
     val alpha by infiniteTransition.animateFloat(
         initialValue = 0.4f,
         targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(1200, easing = LinearEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
+        animationSpec = infiniteRepeatable(animation = tween(1200, easing = LinearEasing), repeatMode = RepeatMode.Reverse),
         label = "pulse"
     )
-
     Icon(
         imageVector = Icons.Default.Nfc,
         contentDescription = "NFC",
-        modifier = Modifier
-            .size(120.dp)
-            .alpha(alpha),
+        modifier = Modifier.size(120.dp).alpha(alpha),
         tint = MaterialTheme.colorScheme.primary
     )
     Spacer(Modifier.height(24.dp))
-    Text(
-        text = "Hold phone to spool",
-        style = MaterialTheme.typography.headlineMedium,
-        textAlign = TextAlign.Center
-    )
+    Text("Hold phone to spool", style = MaterialTheme.typography.headlineMedium, textAlign = TextAlign.Center)
     Spacer(Modifier.height(8.dp))
     Text(
-        text = "Place your phone against the NFC tag on the filament spool",
+        "Tap a Bambu Lab spool's RFID tag or a spool's NFC sticker",
         style = MaterialTheme.typography.bodyMedium,
         textAlign = TextAlign.Center,
         color = MaterialTheme.colorScheme.onSurfaceVariant
     )
-}
-
-@Composable
-private fun ScanningIndicator() {
-    CircularProgressIndicator(modifier = Modifier.size(64.dp))
-    Spacer(Modifier.height(24.dp))
-    Text(
-        text = "Reading spool...",
-        style = MaterialTheme.typography.headlineMedium
-    )
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun ActionChooserSheet(
-    filament: FilamentData,
-    existingSpool: Spool?,
-    viewModel: ScanViewModel,
-    onDismiss: () -> Unit
-) {
-    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        sheetState = sheetState
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(24.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            // Filament identity
-            ColorSwatch(colorRgba = filament.colorRgba, size = 72.dp)
-            Spacer(Modifier.height(12.dp))
-            Text(filament.detailedType, style = MaterialTheme.typography.headlineMedium)
-            Text(
-                "${filament.filamentType}  |  ${filament.colorRgba.toHexColorString()}",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-
-            if (filament.maxHotendTempC > 0) {
-                Spacer(Modifier.height(8.dp))
-                TemperatureInfo(
-                    minHotend = filament.minHotendTempC,
-                    maxHotend = filament.maxHotendTempC,
-                    bedTemp = filament.bedTempC
-                )
-            }
-
-            Spacer(Modifier.height(20.dp))
-
-            if (existingSpool != null) {
-                // Existing spool — show current status and relevant actions
-                Card(
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.surfaceVariant
-                    ),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Column(modifier = Modifier.padding(16.dp)) {
-                        Text(
-                            "#%03d  |  ${existingSpool.status.displayName()}".format(existingSpool.id),
-                            style = MaterialTheme.typography.titleLarge
-                        )
-                        if (existingSpool.filament.productionDate.isNotBlank()) {
-                            Text(
-                                "Produced: ${existingSpool.filament.productionDate}",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
-                }
-
-                Spacer(Modifier.height(16.dp))
-
-                when (existingSpool.status) {
-                    SpoolStatus.IN_STOCK -> {
-                        // Can: mark as in use, or remove (empty spool)
-                        Button(
-                            onClick = { viewModel.markInUse(existingSpool) },
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Icon(Icons.Default.PlayArrow, null, Modifier.size(20.dp))
-                            Spacer(Modifier.size(8.dp))
-                            Text("Put in printer")
-                        }
-                        Spacer(Modifier.height(8.dp))
-                        OutlinedButton(
-                            onClick = { viewModel.removeFromInventory(existingSpool) },
-                            modifier = Modifier.fillMaxWidth(),
-                            colors = ButtonDefaults.outlinedButtonColors(
-                                contentColor = MaterialTheme.colorScheme.error
-                            )
-                        ) {
-                            Icon(Icons.Default.Delete, null, Modifier.size(20.dp))
-                            Spacer(Modifier.size(8.dp))
-                            Text("Spool is empty / remove")
-                        }
-                    }
-                    SpoolStatus.IN_USE -> {
-                        // Can: mark not in use (back to stock), or remove (finished)
-                        Button(
-                            onClick = { viewModel.markNotInUse(existingSpool) },
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Icon(Icons.Default.Stop, null, Modifier.size(20.dp))
-                            Spacer(Modifier.size(8.dp))
-                            Text("Remove from printer")
-                        }
-                        Spacer(Modifier.height(8.dp))
-                        OutlinedButton(
-                            onClick = { viewModel.removeFromInventory(existingSpool) },
-                            modifier = Modifier.fillMaxWidth(),
-                            colors = ButtonDefaults.outlinedButtonColors(
-                                contentColor = MaterialTheme.colorScheme.error
-                            )
-                        ) {
-                            Icon(Icons.Default.Delete, null, Modifier.size(20.dp))
-                            Spacer(Modifier.size(8.dp))
-                            Text("Spool is empty / remove")
-                        }
-                    }
-                    SpoolStatus.USED_UP -> {
-                        // Shouldn't normally happen (used up spools are filtered out)
-                        Text(
-                            "This spool was already removed from inventory",
-                            style = MaterialTheme.typography.bodyMedium
-                        )
-                    }
-                }
-            } else {
-                // New spool — only option is to add
-                Text(
-                    "New spool",
-                    style = MaterialTheme.typography.titleLarge
-                )
-                Spacer(Modifier.height(4.dp))
-                Text(
-                    "This spool is not in your inventory yet",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Spacer(Modifier.height(16.dp))
-
-                Button(
-                    onClick = { viewModel.addToInventory(filament) },
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Icon(Icons.Default.Add, null, Modifier.size(20.dp))
-                    Spacer(Modifier.size(8.dp))
-                    Text("Add to inventory")
-                }
-            }
-
-            Spacer(Modifier.height(12.dp))
-            TextButton(onClick = onDismiss) {
-                Text("Cancel")
-            }
-            Spacer(Modifier.height(16.dp))
-        }
-    }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun DoneSheet(
-    spool: Spool,
-    message: String,
-    onDismiss: () -> Unit
-) {
-    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        sheetState = sheetState
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(24.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            Icon(
-                Icons.Default.CheckCircle,
-                contentDescription = null,
-                modifier = Modifier.size(48.dp),
-                tint = MaterialTheme.colorScheme.primary
-            )
-            Spacer(Modifier.height(12.dp))
-            Text(message, style = MaterialTheme.typography.headlineSmall)
-
-            Spacer(Modifier.height(16.dp))
-
-            ColorSwatch(colorRgba = spool.filament.colorRgba, size = 56.dp)
-            Spacer(Modifier.height(8.dp))
-            Text(
-                "#%03d  %s".format(spool.id, spool.filament.detailedType),
-                style = MaterialTheme.typography.titleLarge
-            )
-            Text(
-                spool.status.displayName(),
-                style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-
-            Spacer(Modifier.height(20.dp))
-            TextButton(onClick = onDismiss) {
-                Text("Done")
-            }
-            Spacer(Modifier.height(16.dp))
-        }
-    }
 }

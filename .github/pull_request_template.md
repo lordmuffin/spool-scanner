@@ -8,10 +8,6 @@ What does this PR do? Why?
 
 ## Testing
 
-- [ ] Tested on physical device with NFC
-- [ ] Web app tested in Chrome
-- [ ] No credentials or API keys in the diff
-
-## Related Issues
-
-Closes #
+- [ ] `./gradlew testDebugUnitTest assembleDebug` passes
+- [ ] Tested on a physical device with NFC (Bambu tag and/or NTAG215 sticker)
+- [ ] No credentials or tokens in the diff

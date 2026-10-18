@@ -1,4 +1,0 @@
-Maintenance update for BSM — Bambu Spool Manager.
-
-- Now targets Android 16 (API 36) for improved compatibility with the latest devices
-- No functional changes; scanning, inventory tracking, cloud sync, and label printing work as before

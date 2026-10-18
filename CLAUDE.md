@@ -1,79 +1,44 @@
 # CLAUDE.md — Project Instructions
 
 ## Project
-**BSM — Bambu Spool Manager**
-An Android + web app to read Bambu Lab filament spool NFC tags, manage filament inventory, and print labels via Fichero D11s thermal printer.
-This project is **open source** — all code, docs, and setup instructions must be clear enough for external contributors.
+**Spool Scanner**: an Android app that taps a filament spool's NFC tag, finds or creates the spool in a
+self-hosted [Spoolman](https://github.com/Donkie/Spoolman) (0.26.1), manages its inventory (weigh, use,
+location, archive), and prints a spool label through [labelito](https://github.com/chiva/labelito) on a
+Brother QL-800. Fork of [GraafG/bambu-spool-manager](https://github.com/GraafG/bambu-spool-manager) (MIT):
+its Bambu tag decoding is kept; Firebase, Google sign-in, the web dashboard and Fichero printing were removed.
 
-## Documentation Requirements
-- Keep README.md up to date with every significant change (new features, setup steps, architecture changes)
-- Document all setup steps (Firebase, Android Studio, NFC, web app, Fichero) so a new developer can get running from scratch
-- Add inline code comments only where logic is non-obvious (e.g., NFC key derivation, MIFARE block parsing, label rendering)
-- When adding a new dependency, document why it's needed in README.md
+Keep README.md current with every significant change, and document why any new dependency is needed.
 
 ## Code Style & Conventions
+- Kotlin, Jetpack Compose + Material 3, MVVM (ViewModel + StateFlow), Hilt
+- Spoolman is the source of truth. Room is only an offline cache of the last spool listing.
+- Retrofit + kotlinx.serialization for Spoolman, plain OkHttp for labelito
+- Min SDK 24, Target SDK 36. Namespace `com.bambu.nfc` (kept from upstream), applicationId `dev.apj.spoolscanner`
+- Pure logic (matching, NDEF codec, URI parsing, label fields) lives outside Android classes and has JVM unit tests
 
-### Android App
-- Language: Kotlin
-- UI: Jetpack Compose + Material 3
-- Architecture: MVVM (ViewModel + StateFlow + Compose)
-- DI: Hilt
-- Local DB: Room
-- Cloud: Firebase Firestore (offline-first sync)
-- Min SDK: 24, Target SDK: 36
-- Package: `com.bambu.nfc`
+## Do not change
+`data/nfc/KeyDerivation.kt`, `BambuTagReader.kt`, `BambuTagParser.kt`: upstream's verified Bambu MIFARE
+Classic reading (HKDF-SHA256 of the 4-byte UID; salt `9a759cf2c4f7caff222cb9769b41bc96`, info `"RFID-A\0"`,
+96 bytes = 16 sector keys × 6). Derive extra values from the raw blocks elsewhere (see `BambuTrayUuid.kt`).
 
-### Web App
-- Single-page HTML app (no build step)
-- Firebase SDK for auth + Firestore
-- Fichero printer library bundled via esbuild (see `web/build-fichero.sh`)
-- Label canvas: 232x96px (30x14mm at 203 DPI)
-- Print direction: "left" (canvas rotated 90° CW before rasterizing)
+## Key facts
+- **Bambu tags**: two per spool, different UIDs, same tray UUID (block 9, 16 bytes → 32 hex chars = AMS
+  `tray_uuid`). Pixels can't read MIFARE Classic (no NXP controller); the app then falls back to the UID.
+- **Stickers**: NTAG215 with one NDEF URI record `WEB+SPOOLMAN:S-<id>`, the exact string Spoolman 0.26.1 puts in
+  its own QR labels (`spoolQrCodePrintingDialog.tsx`); parsed case-insensitively, plus `…/spool/show/<id>` URLs.
+- **Spoolman extra fields** (created on start if missing): spool `bambu_tray_uuid`, `nfc_uid` (comma-separated
+  UIDs); filament `bambu_material_id`. Values are JSON-encoded strings (`"\"abc\""`). Spoolman merges `extra` per
+  key on PATCH. Bambuddy also writes spool `tag` (= tray UUID) and `bambu_color_name`; we match on `tag` and set
+  both when those fields exist.
+- **labelito**: `POST /preview` (PNG) and `POST /print` with `{"template":"spool-label","fields":{material,color,
+  vendor,spool_id,qr}}`, bearer token. 401 = bad token, 409 = wrong roll / printer fault, timeout or 502/503/504 =
+  the gaming PC hosting the USB printer is asleep.
+- Both default URLs are on `*.lab.apj.dev`, which only resolves on the home Wi-Fi.
 
-## Key Technical Details
-
-### NFC Tag Format (MIFARE Classic 1K)
-- 16 sectors, 4 blocks/sector, 16 bytes/block
-- Authentication: HKDF-SHA256 key derivation from 4-byte UID
-  - Salt: `9a759cf2c4f7caff222cb9769b41bc96`
-  - Info: `"RFID-A\0"` (ASCII with null terminator)
-  - Single HKDF expand produces 96 bytes (16 keys x 6 bytes)
-- Key blocks: 1 (material), 2 (type), 4 (detailed type), 5 (color/weight/diameter), 6 (temps), 9 (tray UID), 12 (production date), 14 (length)
-
-### Inventory Model
-- Each physical spool tracked individually with auto-incrementing ID (#001, #002, ...)
-- Statuses: `IN_STOCK` → `IN_USE` → `USED_UP`
-- Used-up spools kept in history for reorder reference
-- Matching existing spools by `trayUid` field from NFC tag
-- User always confirms actions after scanning (no auto-processing)
-
-### Label Printing (Fichero D11s)
-- Printhead: 96px wide, 203 DPI
-- Label stickers: 30x14mm (232x96px canvas)
-- Library: [fichero-printer](https://github.com/0xMH/fichero-printer) by @0xMH
-- Bundled via esbuild to `web/public/fichero.js`
-- Anti-aliased text must be thresholded to pure black/white before encoding (ImageEncoder only treats R=0 as black)
-
-### Color Names
-- Bambu Lab official color hex codes mapped to names (Cyan, Marine Blue, Ice Blue, etc.)
-- Source: Bambu Lab hex code tables + printbusters.io
-- Nearest-match fallback within RGB distance of 30
-
-### Firebase
-- Project hosting: Firebase Hosting
-- Auth: Google sign-in
-- Database: Firestore (offline-first)
-- `google-services.json` is gitignored — see `.json.example`
-
-## Build & Run
+## Build & Test
 ```bash
-# Android
-./gradlew assembleDebug
-./gradlew installDebug
-
-# Web — rebuild Fichero library (only when upstream changes)
-cd web && bash build-fichero.sh
-
-# Web — deploy
-cd web && firebase deploy --only hosting
+./gradlew testDebugUnitTest   # JVM unit tests
+./gradlew assembleDebug       # debug APK
 ```
+Never create test data in the real Spoolman. `SpoolmanRepositoryTest` uses MockWebServer; the optional live test
+(`SPOOLMAN_LIVE_URL`) is meant for a throwaway container (see README).
