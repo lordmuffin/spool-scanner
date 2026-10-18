@@ -2,19 +2,21 @@ package com.bambu.nfc.di
 
 import android.content.Context
 import androidx.room.Room
-import com.bambu.nfc.data.auth.GoogleSignInHelper
-import com.bambu.nfc.data.firestore.FirestoreSync
+import com.bambu.nfc.BuildConfig
+import com.bambu.nfc.data.labelito.LabelitoClient
 import com.bambu.nfc.data.local.AppDatabase
-import com.bambu.nfc.data.local.dao.SpoolDao
-import com.bambu.nfc.data.repository.SpoolRepositoryImpl
-import com.bambu.nfc.domain.repository.SpoolRepository
-import com.google.firebase.auth.FirebaseAuth
-import com.google.firebase.firestore.FirebaseFirestore
+import com.bambu.nfc.data.local.SpoolCache
+import com.bambu.nfc.data.settings.SettingsStore
+import com.bambu.nfc.data.spoolman.SpoolmanApiProvider
+import com.bambu.nfc.data.spoolman.SpoolmanRepository
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
+import okhttp3.OkHttpClient
+import okhttp3.logging.HttpLoggingInterceptor
+import java.util.concurrent.TimeUnit
 import javax.inject.Singleton
 
 @Module
@@ -23,38 +25,39 @@ object AppModule {
 
     @Provides
     @Singleton
-    fun provideDatabase(@ApplicationContext context: Context): AppDatabase {
-        return Room.databaseBuilder(
-            context,
-            AppDatabase::class.java,
-            "bambu_nfc.db"
-        ).fallbackToDestructiveMigration()
+    fun provideDatabase(@ApplicationContext context: Context): AppDatabase =
+        Room.databaseBuilder(context, AppDatabase::class.java, "bambu_nfc.db")
+            .fallbackToDestructiveMigration()
             .build()
-    }
-
-    @Provides
-    fun provideSpoolDao(db: AppDatabase): SpoolDao = db.spoolDao()
 
     @Provides
     @Singleton
-    fun provideFirestore(): FirebaseFirestore = FirebaseFirestore.getInstance()
+    fun provideSpoolCache(db: AppDatabase): SpoolCache = SpoolCache(db.cachedSpoolDao())
 
     @Provides
     @Singleton
-    fun provideFirebaseAuth(): FirebaseAuth = FirebaseAuth.getInstance()
+    fun provideSettings(@ApplicationContext context: Context): SettingsStore = SettingsStore(context)
 
     @Provides
     @Singleton
-    fun provideGoogleSignInHelper(auth: FirebaseAuth): GoogleSignInHelper {
-        // Web client ID from google-services.json (OAuth client type 3)
-        val webClientId = "11149312559-ov6k1aq55upj67033k45gpj85s1rti0b.apps.googleusercontent.com"
-        return GoogleSignInHelper(auth, webClientId)
-    }
+    fun provideOkHttp(): OkHttpClient = OkHttpClient.Builder()
+        .connectTimeout(5, TimeUnit.SECONDS)
+        .readTimeout(20, TimeUnit.SECONDS)
+        .writeTimeout(10, TimeUnit.SECONDS)
+        .apply {
+            if (BuildConfig.DEBUG) addInterceptor(HttpLoggingInterceptor().setLevel(HttpLoggingInterceptor.Level.BASIC))
+        }
+        .build()
 
     @Provides
     @Singleton
-    fun provideSpoolRepository(
-        dao: SpoolDao,
-        firestoreSync: FirestoreSync
-    ): SpoolRepository = SpoolRepositoryImpl(dao, firestoreSync)
+    fun provideSpoolmanRepository(okHttp: OkHttpClient, settings: SettingsStore): SpoolmanRepository =
+        SpoolmanRepository(SpoolmanApiProvider(okHttp) { settings.current.spoolmanUrl })
+
+    @Provides
+    @Singleton
+    fun provideLabelito(okHttp: OkHttpClient, settings: SettingsStore): LabelitoClient =
+        LabelitoClient(okHttp) {
+            settings.current.let { LabelitoClient.Config(it.labelitoUrl, it.labelitoToken) }
+        }
 }

@@ -1,127 +1,107 @@
 package com.bambu.nfc.ui.inventory
 
-import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Clear
-import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Tab
-import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import com.bambu.nfc.data.spoolman.Spool
+import com.bambu.nfc.ui.components.ColorSwatch
+import com.bambu.nfc.ui.scan.matches
+import com.bambu.nfc.ui.spool.fmt
+import java.text.DateFormat
+import java.util.Date
 
 @Composable
-fun InventoryScreen(
-    viewModel: InventoryViewModel,
-    onSpoolClick: (Long) -> Unit
-) {
-    val spools by viewModel.spools.collectAsState()
-    val searchQuery by viewModel.searchQuery.collectAsState()
-    val typeFilter by viewModel.typeFilter.collectAsState()
-    val showUsedUp by viewModel.showUsedUp.collectAsState()
+fun InventoryScreen(viewModel: InventoryViewModel, onSpoolClick: (Long) -> Unit) {
+    val state by viewModel.state.collectAsState()
+    // Refresh whenever the tab is shown, so changes made on the detail screen appear.
+    LaunchedEffect(Unit) { viewModel.refresh() }
+    val shown = state.spools.filter { (state.showArchived || !it.archived) && it.matches(state.query) }
 
-    Column(modifier = Modifier.fillMaxSize()) {
-        // Tabs: Active inventory vs Used Up (reorder list)
-        TabRow(selectedTabIndex = if (showUsedUp) 1 else 0) {
-            Tab(
-                selected = !showUsedUp,
-                onClick = { viewModel.setShowUsedUp(false) },
-                text = { Text("Inventory") }
-            )
-            Tab(
-                selected = showUsedUp,
-                onClick = { viewModel.setShowUsedUp(true) },
-                text = { Text("Used Up") }
-            )
-        }
-
-        // Search
-        OutlinedTextField(
-            value = searchQuery,
-            onValueChange = { viewModel.setSearch(it) },
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 8.dp),
-            placeholder = { Text("Search filament...") },
-            leadingIcon = { Icon(Icons.Default.Search, contentDescription = "Search") },
-            trailingIcon = {
-                if (searchQuery.isNotBlank()) {
-                    IconButton(onClick = { viewModel.setSearch("") }) {
-                        Icon(Icons.Default.Clear, contentDescription = "Clear")
-                    }
-                }
-            },
-            singleLine = true
-        )
-
-        // Type filter chips
+    Column(Modifier.fillMaxSize()) {
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .horizontalScroll(rememberScrollState())
-                .padding(horizontal = 16.dp, vertical = 4.dp),
+            Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            val types = listOf("PLA", "PETG", "ABS", "TPU", "ASA", "PA")
-            types.forEach { type ->
-                FilterChip(
-                    selected = typeFilter == type,
-                    onClick = {
-                        viewModel.setTypeFilter(if (typeFilter == type) null else type)
-                    },
-                    label = { Text(type) }
+            OutlinedTextField(
+                value = state.query, onValueChange = viewModel::setQuery, label = { Text("Search spools") },
+                singleLine = true, modifier = Modifier.weight(1f)
+            )
+            IconButton(onClick = viewModel::refresh) { Icon(Icons.Default.Refresh, "Refresh") }
+        }
+        Row(Modifier.padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+            FilterChip(
+                selected = state.showArchived,
+                onClick = { viewModel.setShowArchived(!state.showArchived) },
+                label = { Text("Show archived") }
+            )
+            Text(
+                "  ${shown.size} spools, ${shown.sumOf { it.remainingWeight ?: 0.0 }.div(1000).let { "%.1f".format(it) }} kg",
+                style = MaterialTheme.typography.bodySmall
+            )
+        }
+        if (state.loading) LinearProgressIndicator(Modifier.fillMaxWidth())
+        state.error?.let { err ->
+            Card(
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
+                modifier = Modifier.fillMaxWidth().padding(16.dp)
+            ) {
+                Text(
+                    err + (state.offlineSince?.let {
+                        "\nShowing the offline copy from ${DateFormat.getDateTimeInstance().format(Date(it))}."
+                    } ?: ""),
+                    color = MaterialTheme.colorScheme.onErrorContainer,
+                    modifier = Modifier.padding(12.dp)
                 )
             }
         }
-
-        // List
-        if (spools.isEmpty()) {
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(32.dp),
-                verticalArrangement = Arrangement.Center
-            ) {
-                Text(
-                    text = when {
-                        searchQuery.isNotBlank() || typeFilter != null -> "No spools match your filters"
-                        showUsedUp -> "No used up spools yet. When you finish a spool, it will appear here for reordering."
-                        else -> "No spools yet. Scan a filament spool to get started!"
-                    },
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-        } else {
-            LazyColumn(
-                contentPadding = PaddingValues(16.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                items(spools, key = { it.id }) { spool ->
-                    SpoolCard(
-                        spool = spool,
-                        onClick = { onSpoolClick(spool.id) }
-                    )
-                }
+        LazyColumn(Modifier.fillMaxSize()) {
+            items(shown, key = { it.id }) { spool ->
+                SpoolRow(spool, enabled = state.offlineSince == null && state.error == null) { onSpoolClick(spool.id) }
+                HorizontalDivider()
             }
         }
     }
+}
+
+@Composable
+private fun SpoolRow(spool: Spool, enabled: Boolean, onClick: () -> Unit) {
+    val f = spool.filament
+    ListItem(
+        leadingContent = {
+            f.colorHex?.let { hex ->
+                runCatching { (0xFF000000 or hex.take(6).toLong(16)).toInt() }.getOrNull()?.let { ColorSwatch(it, size = 40.dp) }
+            }
+        },
+        headlineContent = { Text("#${spool.id}  ${f.name ?: f.material ?: "Filament"}" + if (spool.archived) " (archived)" else "") },
+        supportingContent = { Text(listOfNotNull(f.vendor?.name, f.material, spool.location).joinToString("  |  ")) },
+        trailingContent = { Text(spool.remainingWeight?.let { "${it.fmt()} g" } ?: "?", style = MaterialTheme.typography.titleMedium) },
+        modifier = if (enabled) Modifier.clickable(onClick = onClick) else Modifier
+    )
 }

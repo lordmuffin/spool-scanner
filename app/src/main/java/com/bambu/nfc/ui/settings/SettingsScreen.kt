@@ -1,162 +1,160 @@
 package com.bambu.nfc.ui.settings
 
-import android.content.Intent
-import android.net.Uri
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.Logout
-import androidx.compose.material.icons.filled.DeleteForever
-import androidx.compose.material.icons.filled.Person
-import androidx.compose.material.icons.filled.Policy
-import androidx.compose.material3.AlertDialog
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.material3.Button
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.ListItem
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import com.bambu.nfc.BuildConfig
+import com.bambu.nfc.data.labelito.LabelitoClient
+import com.bambu.nfc.data.settings.AppSettings
+import com.bambu.nfc.data.settings.SettingsStore
+import com.bambu.nfc.data.spoolman.SpoolmanRepository
+import com.bambu.nfc.data.spoolman.spoolmanErrorMessage
+import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.launch
+import kotlinx.serialization.json.jsonPrimitive
+import javax.inject.Inject
 
-@Composable
-fun SettingsScreen(
-    userName: String?,
-    userEmail: String?,
-    onSignOut: () -> Unit,
-    onDeleteAccount: () -> Unit
-) {
-    val context = LocalContext.current
-    var showDeleteDialog by remember { mutableStateOf(false) }
+@HiltViewModel
+class SettingsViewModel @Inject constructor(
+    private val store: SettingsStore,
+    private val spoolman: SpoolmanRepository,
+    private val labelito: LabelitoClient,
+) : ViewModel() {
+    val settings: StateFlow<AppSettings> = store.settings
 
-    if (showDeleteDialog) {
-        AlertDialog(
-            onDismissRequest = { showDeleteDialog = false },
-            title = { Text("Delete account?") },
-            text = {
-                Text(
-                    "This will delete all your spool data from the cloud and sign you out. " +
-                        "Local data on this device will be kept. This action cannot be undone."
-                )
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    showDeleteDialog = false
-                    onDeleteAccount()
-                }) {
-                    Text("Delete", color = MaterialTheme.colorScheme.error)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showDeleteDialog = false }) {
-                    Text("Cancel")
-                }
+    private val _spoolmanResult = MutableStateFlow<String?>(null)
+    val spoolmanResult: StateFlow<String?> = _spoolmanResult
+    private val _labelitoResult = MutableStateFlow<String?>(null)
+    val labelitoResult: StateFlow<String?> = _labelitoResult
+
+    fun save(settings: AppSettings) = store.save(settings)
+
+    /** GET /api/v1/info, then make sure the app's extra fields exist on that server. */
+    fun testSpoolman() {
+        _spoolmanResult.value = "Testing…"
+        viewModelScope.launch {
+            _spoolmanResult.value = try {
+                val version = spoolman.info()["version"]?.jsonPrimitive?.content ?: "?"
+                val created = spoolman.ensureExtraFields()
+                "OK: Spoolman $version" + if (created.isNotEmpty()) ". Created extra fields: ${created.joinToString()}" else ". Extra fields present."
+            } catch (e: Exception) {
+                "Failed: ${spoolmanErrorMessage(e)}"
             }
-        )
+        }
     }
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(top = 16.dp)
-    ) {
+    fun testLabelito() {
+        _labelitoResult.value = "Testing…"
+        viewModelScope.launch {
+            _labelitoResult.value = try {
+                "OK: ${labelito.printerStatus().take(300)}"
+            } catch (e: Exception) {
+                "Failed: ${e.message}"
+            }
+        }
+    }
+}
+
+@Composable
+fun SettingsScreen(viewModel: SettingsViewModel) {
+    val saved by viewModel.settings.collectAsState()
+    val spoolmanResult by viewModel.spoolmanResult.collectAsState()
+    val labelitoResult by viewModel.labelitoResult.collectAsState()
+
+    var spoolmanUrl by remember(saved) { mutableStateOf(saved.spoolmanUrl) }
+    var labelitoUrl by remember(saved) { mutableStateOf(saved.labelitoUrl) }
+    var token by remember(saved) { mutableStateOf(saved.labelitoToken) }
+    var showToken by remember { mutableStateOf(false) }
+    val dirty = spoolmanUrl != saved.spoolmanUrl || labelitoUrl != saved.labelitoUrl || token != saved.labelitoToken
+
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp)) {
+        Text("Settings", style = MaterialTheme.typography.headlineMedium)
         Text(
-            "Settings",
-            style = MaterialTheme.typography.headlineMedium,
-            modifier = Modifier.padding(horizontal = 16.dp)
+            "Both services live on *.lab.apj.dev, which only resolves on the home Wi-Fi.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
         )
 
         Spacer(Modifier.height(16.dp))
-
-        // Account section
-        Text(
-            "Account",
-            style = MaterialTheme.typography.labelLarge,
-            color = MaterialTheme.colorScheme.primary,
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+        Text("Spoolman", style = MaterialTheme.typography.titleMedium)
+        OutlinedTextField(
+            value = spoolmanUrl, onValueChange = { spoolmanUrl = it }, label = { Text("Base URL") }, singleLine = true,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri), modifier = Modifier.fillMaxWidth()
         )
-
-        ListItem(
-            headlineContent = { Text(userName ?: "Signed in") },
-            supportingContent = userEmail?.let { { Text(it) } },
-            leadingContent = {
-                Icon(Icons.Default.Person, contentDescription = null)
-            }
-        )
-
-        HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
-
-        ListItem(
-            headlineContent = { Text("Sign out") },
-            supportingContent = { Text("Keep local data, disconnect cloud sync") },
-            leadingContent = {
-                Icon(Icons.AutoMirrored.Filled.Logout, contentDescription = null)
-            },
-            modifier = Modifier.clickable { onSignOut() }
-        )
-
-        ListItem(
-            headlineContent = {
-                Text("Delete account", color = MaterialTheme.colorScheme.error)
-            },
-            supportingContent = { Text("Delete all cloud data and sign out") },
-            leadingContent = {
-                Icon(
-                    Icons.Default.DeleteForever,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.error
-                )
-            },
-            modifier = Modifier.clickable { showDeleteDialog = true }
-        )
+        OutlinedButton(onClick = viewModel::testSpoolman, enabled = !dirty) { Text("Test connection") }
+        spoolmanResult?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
 
         Spacer(Modifier.height(16.dp))
-
-        // About section
-        Text(
-            "About",
-            style = MaterialTheme.typography.labelLarge,
-            color = MaterialTheme.colorScheme.primary,
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+        HorizontalDivider()
+        Spacer(Modifier.height(16.dp))
+        Text("labelito (Brother QL-800)", style = MaterialTheme.typography.titleMedium)
+        OutlinedTextField(
+            value = labelitoUrl, onValueChange = { labelitoUrl = it }, label = { Text("Base URL") }, singleLine = true,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri), modifier = Modifier.fillMaxWidth()
         )
-
-        ListItem(
-            headlineContent = { Text("Privacy policy") },
-            leadingContent = {
-                Icon(Icons.Default.Policy, contentDescription = null)
+        OutlinedTextField(
+            value = token, onValueChange = { token = it }, label = { Text("API token (stored encrypted)") }, singleLine = true,
+            visualTransformation = if (showToken) VisualTransformation.None else PasswordVisualTransformation(),
+            trailingIcon = {
+                IconButton(onClick = { showToken = !showToken }) {
+                    Icon(if (showToken) Icons.Default.VisibilityOff else Icons.Default.Visibility, "Show token")
+                }
             },
-            modifier = Modifier.clickable {
-                val intent = Intent(
-                    Intent.ACTION_VIEW,
-                    Uri.parse("https://github.com/GraafG/bambu-spool-manager/blob/main/privacy-policy.md")
-                )
-                context.startActivity(intent)
-            }
+            modifier = Modifier.fillMaxWidth()
         )
+        OutlinedButton(onClick = viewModel::testLabelito, enabled = !dirty) { Text("Test printer status") }
+        labelitoResult?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
 
-        ListItem(
-            headlineContent = { Text("Source code") },
-            supportingContent = { Text("github.com/GraafG/bambu-spool-manager") },
-            modifier = Modifier.clickable {
-                val intent = Intent(
-                    Intent.ACTION_VIEW,
-                    Uri.parse("https://github.com/GraafG/bambu-spool-manager")
-                )
-                context.startActivity(intent)
-            }
+        Spacer(Modifier.height(24.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(onClick = { viewModel.save(AppSettings(spoolmanUrl, labelitoUrl, token)) }, enabled = dirty) { Text("Save") }
+            OutlinedButton(
+                onClick = {
+                    spoolmanUrl = AppSettings.DEFAULT_SPOOLMAN_URL
+                    labelitoUrl = AppSettings.DEFAULT_LABELITO_URL
+                }
+            ) { Text("Reset URLs") }
+        }
+
+        Spacer(Modifier.height(32.dp))
+        Text(
+            "Spool Scanner ${BuildConfig.VERSION_NAME}. Fork of GraafG/bambu-spool-manager (MIT).",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
         )
     }
 }

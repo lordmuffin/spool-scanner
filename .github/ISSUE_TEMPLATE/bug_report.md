@@ -1,6 +1,6 @@
 ---
 name: Bug report
-about: Report a bug in the Android or web app
+about: Report a bug in the app
 title: ''
 labels: bug
 assignees: ''

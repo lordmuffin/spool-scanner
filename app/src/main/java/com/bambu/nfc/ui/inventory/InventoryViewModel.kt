@@ -2,55 +2,52 @@ package com.bambu.nfc.ui.inventory
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.bambu.nfc.domain.model.Spool
-import com.bambu.nfc.domain.repository.SpoolRepository
+import com.bambu.nfc.data.local.SpoolCache
+import com.bambu.nfc.data.spoolman.Spool
+import com.bambu.nfc.data.spoolman.SpoolmanRepository
+import com.bambu.nfc.data.spoolman.spoolmanErrorMessage
 import dagger.hilt.android.lifecycle.HiltViewModel
-import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.flatMapLatest
-import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 @HiltViewModel
 class InventoryViewModel @Inject constructor(
-    private val repository: SpoolRepository
+    private val spoolman: SpoolmanRepository,
+    private val cache: SpoolCache,
 ) : ViewModel() {
 
-    val searchQuery = MutableStateFlow("")
-    val typeFilter = MutableStateFlow<String?>(null)
-    val showUsedUp = MutableStateFlow(false)
+    data class State(
+        val spools: List<Spool> = emptyList(),
+        val loading: Boolean = false,
+        /** Set when showing the offline cache because Spoolman couldn't be reached. */
+        val offlineSince: Long? = null,
+        val error: String? = null,
+        val query: String = "",
+        val showArchived: Boolean = false,
+    )
 
-    @OptIn(ExperimentalCoroutinesApi::class)
-    val spools: StateFlow<List<Spool>> = combine(
-        searchQuery, showUsedUp
-    ) { query, usedUp ->
-        query to usedUp
-    }.flatMapLatest { (query, usedUp) ->
-        when {
-            query.isNotBlank() -> repository.search(query)
-            usedUp -> repository.getUsedUp()
-            else -> repository.getActive()
+    private val _state = MutableStateFlow(State())
+    val state: StateFlow<State> = _state
+
+    fun refresh() {
+        viewModelScope.launch {
+            _state.update { it.copy(loading = true, error = null) }
+            try {
+                val spools = spoolman.listSpools(includeArchived = true)
+                cache.save(spools)
+                _state.update { it.copy(spools = spools, loading = false, offlineSince = null) }
+            } catch (e: Exception) {
+                val (cached, fetchedAt) = runCatching { cache.load() }.getOrDefault(emptyList<Spool>() to null)
+                _state.update {
+                    it.copy(spools = cached, loading = false, offlineSince = fetchedAt, error = spoolmanErrorMessage(e))
+                }
+            }
         }
-    }.combine(typeFilter) { spools, type ->
-        if (type != null) {
-            spools.filter { it.filament.filamentType.equals(type, ignoreCase = true) }
-        } else {
-            spools
-        }
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
-
-    fun setSearch(query: String) {
-        searchQuery.value = query
     }
 
-    fun setTypeFilter(type: String?) {
-        typeFilter.value = type
-    }
-
-    fun setShowUsedUp(show: Boolean) {
-        showUsedUp.value = show
-    }
+    fun setQuery(q: String) = _state.update { it.copy(query = q) }
+    fun setShowArchived(show: Boolean) = _state.update { it.copy(showArchived = show) }
 }
