@@ -13,6 +13,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -22,7 +23,9 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Nfc
+import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -44,7 +47,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.bambu.nfc.data.nfc.TagRead
@@ -72,6 +78,8 @@ fun ScanScreen(viewModel: ScanViewModel) {
             ScanViewModel.UiState.Ready -> {
                 if (centered) Spacer(Modifier.height(96.dp))
                 ScanPrompt()
+                Spacer(Modifier.height(24.dp))
+                ScanQrButton(viewModel::openQrScanner)
                 warning?.let {
                     Spacer(Modifier.height(24.dp))
                     ErrorCard(it)
@@ -85,13 +93,18 @@ fun ScanScreen(viewModel: ScanViewModel) {
                 Text(state.message, style = MaterialTheme.typography.titleLarge)
             }
             is ScanViewModel.UiState.Known -> {
-                SpoolPanel(spool = state.spool, justCreated = state.justCreated, onWriteSticker = viewModel::armWrite)
+                SpoolPanel(
+                    spool = state.spool,
+                    justCreated = state.justCreated,
+                    offerSticker = state.offerSticker,
+                    onWriteSticker = viewModel::armWrite,
+                )
                 Spacer(Modifier.height(16.dp))
                 TextButton(onClick = viewModel::dismiss) { Text("Done") }
             }
             is ScanViewModel.UiState.Create -> CreateSpoolForm(
                 initial = state.spec,
-                fromBambuTag = state.fromBambuTag,
+                prefilledFrom = state.prefilledFrom,
                 onCreate = viewModel::createSpool,
                 onCancel = viewModel::dismiss,
             )
@@ -101,12 +114,29 @@ fun ScanScreen(viewModel: ScanViewModel) {
                 onPick = { viewModel.link(state.read, it) },
                 onCancel = viewModel::dismiss,
             )
+            is ScanViewModel.UiState.NotFound -> {
+                Spacer(Modifier.height(48.dp))
+                ScanPrompt()
+                Spacer(Modifier.height(24.dp))
+                ErrorCard("Spool #${state.spoolId} not found in Spoolman")
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    TextButton(onClick = { viewModel.openSpool(state.spoolId) }) { Text("Retry") }
+                    TextButton(onClick = viewModel::dismiss) { Text("OK") }
+                }
+                ScanQrButton(viewModel::openQrScanner)
+            }
+            is ScanViewModel.UiState.NotSpoolmanCode -> {
+                Spacer(Modifier.height(48.dp))
+                NotSpoolmanCode(state.raw)
+                TextButton(onClick = viewModel::dismiss) { Text("OK") }
+            }
             is ScanViewModel.UiState.Error -> {
                 Spacer(Modifier.height(48.dp))
                 ScanPrompt()
                 Spacer(Modifier.height(24.dp))
                 ErrorCard(state.message)
                 TextButton(onClick = viewModel::dismiss) { Text("OK") }
+                ScanQrButton(viewModel::openQrScanner)
             }
         }
     }
@@ -173,6 +203,33 @@ fun Spool.matches(query: String): Boolean {
         "#$id", filament.name, filament.material, filament.vendor?.name, filament.colorHex, location
     ).joinToString(" ")
     return query.trim().split(Regex("\\s+")).all { haystack.contains(it, ignoreCase = true) }
+}
+
+@Composable
+private fun ScanQrButton(onClick: () -> Unit) {
+    OutlinedButton(onClick = onClick) {
+        Icon(Icons.Default.QrCodeScanner, null, Modifier.size(20.dp))
+        Spacer(Modifier.size(8.dp))
+        Text("Scan QR label")
+    }
+}
+
+/** A QR code or link that isn't a Spoolman code: show it raw, with Copy. No lookup happens. */
+@Composable
+fun NotSpoolmanCode(raw: String, modifier: Modifier = Modifier) {
+    val clipboard = LocalClipboardManager.current
+    Card(modifier = modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp)) {
+            Text("Not a Spoolman code", style = MaterialTheme.typography.titleMedium)
+            Spacer(Modifier.height(4.dp))
+            Text(raw, style = MaterialTheme.typography.bodyMedium, fontFamily = FontFamily.Monospace, maxLines = 6)
+            TextButton(onClick = { clipboard.setText(AnnotatedString(raw)) }) {
+                Icon(Icons.Default.ContentCopy, null, Modifier.size(18.dp))
+                Spacer(Modifier.size(6.dp))
+                Text("Copy")
+            }
+        }
+    }
 }
 
 @Composable

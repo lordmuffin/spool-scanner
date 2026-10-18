@@ -52,6 +52,12 @@ object SpoolMatcher {
         return (current.sorted() + uid).joinToString(",")
     }
 
+    /** Whether Spoolman knows any NFC tag for the spool: a recorded UID or a Bambu tray UUID. */
+    fun hasAnyTag(spool: Spool): Boolean =
+        nfcUids(spool).isNotEmpty() ||
+            !spool.extraValue(ExtraKeys.SPOOL_TRAY_UUID).isNullOrBlank() ||
+            !spool.extraValue(ExtraKeys.BAMBUDDY_TAG).isNullOrBlank()
+
     fun matchVendor(vendors: List<Vendor>, name: String): Vendor? =
         vendors.firstOrNull { it.name.trim().equals(name.trim(), ignoreCase = true) }
 

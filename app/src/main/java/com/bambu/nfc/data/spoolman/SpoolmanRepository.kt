@@ -6,7 +6,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
 /** Spoolman is the source of truth; this wraps its API with the app's lookup/create rules. */
-class SpoolmanRepository(private val provider: SpoolmanApiProvider) {
+class SpoolmanRepository(private val provider: SpoolmanApiSource) {
 
     private val fieldsMutex = Mutex()
     // Base URL → spool extra-field keys known to exist there. Reset when the URL changes.
@@ -53,6 +53,12 @@ class SpoolmanRepository(private val provider: SpoolmanApiProvider) {
         if (e.code() == 404) null else throw e
     }
 
+    suspend fun getFilament(id: Long): Filament? = try {
+        api.filament(id)
+    } catch (e: retrofit2.HttpException) {
+        if (e.code() == 404) null else throw e
+    }
+
     /**
      * Looks a Bambu tag up, then records what the spool didn't know yet: this tag's UID, and the
      * tray UUID when the spool was linked by UID alone (e.g. from a phone that can't decode Bambu tags).
@@ -79,30 +85,13 @@ class SpoolmanRepository(private val provider: SpoolmanApiProvider) {
         return api.patchSpool(spool.id, SpoolPatch(extra = patch.mapValues { ExtraValue.encode(it.value) }))
     }
 
-    /** Match or create vendor → filament, then create the spool. */
+    /**
+     * Match or create vendor → filament, then create the spool. A spec from a filament QR code
+     * carries [NewSpoolSpec.filamentId] and uses that filament as is.
+     */
     suspend fun createSpool(spec: NewSpoolSpec): Spool {
         val spoolKeys = spoolFieldKeys()
-
-        val vendor = SpoolMatcher.matchVendor(api.vendors(), spec.vendorName)
-            ?: api.createVendor(VendorCreate(name = spec.vendorName.trim()))
-
-        val filament = SpoolMatcher.matchFilament(api.filaments(), spec, vendor.id)
-            ?.let { backfillMaterialId(it, spec) }
-            ?: api.createFilament(
-                FilamentCreate(
-                    name = spec.filamentName.trim(),
-                    vendorId = vendor.id,
-                    material = spec.material.trim(),
-                    density = spec.densityGcm3,
-                    diameter = spec.diameterMm,
-                    weight = spec.netWeightG,
-                    spoolWeight = spec.spoolWeightG,
-                    colorHex = spec.colorHex.removePrefix("#").uppercase(),
-                    settingsExtruderTemp = spec.extruderTempC,
-                    settingsBedTemp = spec.bedTempC,
-                    extra = spec.bambuMaterialId?.let { mapOf(ExtraKeys.FILAMENT_MATERIAL_ID to ExtraValue.encode(it)) },
-                )
-            )
+        val filament = spec.filamentId?.let { getFilament(it) } ?: matchOrCreateFilament(spec)
 
         // Only fields that exist on the server: Spoolman rejects unknown extra keys. Bambuddy's `tag`
         // lets it recognise the spool in the AMS rather than adding a duplicate.
@@ -125,6 +114,29 @@ class SpoolmanRepository(private val provider: SpoolmanApiProvider) {
                 extra = extra.ifEmpty { null },
             )
         )
+    }
+
+    private suspend fun matchOrCreateFilament(spec: NewSpoolSpec): Filament {
+        val vendor = SpoolMatcher.matchVendor(api.vendors(), spec.vendorName)
+            ?: api.createVendor(VendorCreate(name = spec.vendorName.trim()))
+
+        return SpoolMatcher.matchFilament(api.filaments(), spec, vendor.id)
+            ?.let { backfillMaterialId(it, spec) }
+            ?: api.createFilament(
+                FilamentCreate(
+                    name = spec.filamentName.trim(),
+                    vendorId = vendor.id,
+                    material = spec.material.trim(),
+                    density = spec.densityGcm3,
+                    diameter = spec.diameterMm,
+                    weight = spec.netWeightG,
+                    spoolWeight = spec.spoolWeightG,
+                    colorHex = spec.colorHex.removePrefix("#").uppercase(),
+                    settingsExtruderTemp = spec.extruderTempC,
+                    settingsBedTemp = spec.bedTempC,
+                    extra = spec.bambuMaterialId?.let { mapOf(ExtraKeys.FILAMENT_MATERIAL_ID to ExtraValue.encode(it)) },
+                )
+            )
     }
 
     private suspend fun backfillMaterialId(filament: Filament, spec: NewSpoolSpec): Filament {

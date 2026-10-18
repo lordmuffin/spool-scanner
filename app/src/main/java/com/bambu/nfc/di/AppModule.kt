@@ -6,7 +6,10 @@ import com.bambu.nfc.BuildConfig
 import com.bambu.nfc.data.labelito.LabelitoClient
 import com.bambu.nfc.data.local.AppDatabase
 import com.bambu.nfc.data.local.SpoolCache
+import com.bambu.nfc.data.qr.CameraQrScanner
+import com.bambu.nfc.data.qr.QrScanner
 import com.bambu.nfc.data.settings.SettingsStore
+import com.bambu.nfc.data.settings.SpoolLinks
 import com.bambu.nfc.data.spoolman.SpoolmanApiProvider
 import com.bambu.nfc.data.spoolman.SpoolmanRepository
 import dagger.Module
@@ -48,6 +51,14 @@ object AppModule {
             if (BuildConfig.DEBUG) addInterceptor(HttpLoggingInterceptor().setLevel(HttpLoggingInterceptor.Level.BASIC))
         }
         .build()
+
+    @Provides
+    @Singleton
+    fun provideSpoolLinks(settings: SettingsStore): SpoolLinks = SpoolLinks { settings.current.spoolmanUrl }
+
+    @Provides
+    @Singleton
+    fun provideQrScanner(camera: CameraQrScanner): QrScanner = camera
 
     @Provides
     @Singleton

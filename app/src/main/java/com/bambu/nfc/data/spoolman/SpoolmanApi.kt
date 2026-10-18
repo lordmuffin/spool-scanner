@@ -44,6 +44,9 @@ interface SpoolmanApi {
     @POST("api/v1/filament")
     suspend fun createFilament(@Body body: FilamentCreate): Filament
 
+    @GET("api/v1/filament/{id}")
+    suspend fun filament(@Path("id") id: Long): Filament
+
     @PATCH("api/v1/filament/{id}")
     suspend fun patchFilament(@Path("id") id: Long, @Body body: FilamentPatch): Filament
 
@@ -75,15 +78,21 @@ val SpoolmanJson = Json {
     namingStrategy = JsonNamingStrategy.SnakeCase
 }
 
+/** Where [SpoolmanRepository] gets its API from; a fake in-memory Spoolman in tests. */
+interface SpoolmanApiSource {
+    fun api(): SpoolmanApi
+    fun currentBaseUrl(): String
+}
+
 /** Builds (and caches) a Retrofit client for whatever Spoolman base URL is configured right now. */
 class SpoolmanApiProvider(
     private val okHttp: OkHttpClient,
     private val baseUrl: () -> String,
-) {
+) : SpoolmanApiSource {
     private var cached: Pair<String, SpoolmanApi>? = null
 
     @Synchronized
-    fun api(): SpoolmanApi {
+    override fun api(): SpoolmanApi {
         val url = normalize(baseUrl())
         cached?.let { (u, api) -> if (u == url) return api }
         val api = Retrofit.Builder()
@@ -96,7 +105,7 @@ class SpoolmanApiProvider(
         return api
     }
 
-    fun currentBaseUrl(): String = normalize(baseUrl())
+    override fun currentBaseUrl(): String = normalize(baseUrl())
 
     companion object {
         fun normalize(url: String): String {

@@ -113,6 +113,13 @@ dependencies {
     implementation(libs.okhttp)
     implementation(libs.okhttp.logging)
 
+    // In-app QR scanner: CameraX preview/analysis + ML Kit barcode scanning, the *bundled* model
+    // (com.google.mlkit:barcode-scanning, not the Play Services one) so it works offline at first use.
+    implementation(libs.androidx.camera.camera2)
+    implementation(libs.androidx.camera.lifecycle)
+    implementation(libs.androidx.camera.view)
+    implementation(libs.mlkit.barcode.scanning)
+
     // EncryptedSharedPreferences for the labelito bearer token.
     implementation(libs.androidx.security.crypto)
 

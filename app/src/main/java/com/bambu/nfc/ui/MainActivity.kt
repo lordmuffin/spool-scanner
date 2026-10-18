@@ -18,6 +18,7 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
+import com.bambu.nfc.data.qr.LinkIntents
 import com.bambu.nfc.ui.navigation.AppNavGraph
 import com.bambu.nfc.ui.scan.NfcStatus
 import com.bambu.nfc.ui.scan.ScanViewModel
@@ -85,8 +86,13 @@ class MainActivity : ComponentActivity() {
                 scanViewModel.tagErrors.collect { haptics.error() }
             }
         }
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                scanViewModel.qrAccepted.collect { haptics.tagDetected() }
+            }
+        }
 
-        // A sticker tapped while the app was closed launches it via NDEF_DISCOVERED (web+spoolman scheme).
+        // Cold start from a sticker tap (NDEF_DISCOVERED) or a label link (ACTION_VIEW App Link).
         if (savedInstanceState == null) handleIntent(intent)
     }
 
@@ -131,8 +137,16 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    /** Only the cold-start / background NDEF_DISCOVERED launch arrives as an intent now. */
+    /**
+     * Tags normally arrive through reader mode; intents bring the rest: an App Link from the stock
+     * camera / a browser (ACTION_VIEW) and a sticker tapped while the app was closed (NDEF_DISCOVERED).
+     */
     private fun handleIntent(intent: Intent) {
+        LinkIntents.linkFrom(intent.action, intent.dataString)?.let { link ->
+            Log.d(TAG, "Link intent: $link")
+            scanViewModel.onLink(link)
+            return
+        }
         if (intent.action != NfcAdapter.ACTION_TECH_DISCOVERED &&
             intent.action != NfcAdapter.ACTION_TAG_DISCOVERED &&
             intent.action != NfcAdapter.ACTION_NDEF_DISCOVERED

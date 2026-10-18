@@ -1,6 +1,7 @@
 package com.bambu.nfc.domain
 
 import com.bambu.nfc.data.labelito.SpoolLabel
+import com.bambu.nfc.data.settings.SpoolLinks
 import com.bambu.nfc.data.spoolman.ExtraValue
 import com.bambu.nfc.data.spoolman.Filament
 import com.bambu.nfc.data.spoolman.Spool
@@ -67,10 +68,30 @@ class NewSpoolSpecTest {
                 "color" to "Mandarin Orange",
                 "vendor" to "Bambu Lab",
                 "spool_id" to "#123",
-                "qr" to "WEB+SPOOLMAN:S-123",
+                "qr" to "https://spoolman.lab.apj.dev/spool/show/123",
             ),
-            SpoolLabel.fields(spool())
+            SpoolLabel.fields(spool(), SpoolLinks { "https://spoolman.lab.apj.dev/" }.forSpool(123))
         )
+    }
+
+    @Test
+    fun `a filament code prefills the form from the Spoolman filament`() {
+        val f = Filament(
+            id = 3, name = "PLA Matte", vendor = Vendor(1, "Bambu Lab"), material = "PLA", colorHex = "f99963",
+            density = 1.31, diameter = 1.75, weight = 1000.0, spoolWeight = 250.0, settingsExtruderTemp = 220,
+            settingsBedTemp = 60, extra = mapOf("bambu_material_id" to ExtraValue.encode("GFA01")),
+        )
+        val spec = NewSpoolSpec.fromFilament(f)
+        assertEquals(3L, spec.filamentId)
+        assertEquals("Bambu Lab", spec.vendorName)
+        assertEquals("PLA Matte", spec.filamentName)
+        assertEquals("F99963", spec.colorHex)
+        assertEquals("Mandarin Orange", spec.colorName)
+        assertEquals(1.31, spec.densityGcm3, 1e-9)
+        assertEquals(250.0, spec.spoolWeightG!!, 1e-9)
+        assertEquals(220, spec.extruderTempC)
+        assertEquals("GFA01", spec.bambuMaterialId)
+        assertNull(spec.nfcUid)
     }
 
     @Test

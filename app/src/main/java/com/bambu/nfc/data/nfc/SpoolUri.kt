@@ -1,28 +1,54 @@
 package com.bambu.nfc.data.nfc
 
+/** What a scanned Spoolman code (QR label, NFC sticker or App Link) points at. */
+sealed interface SpoolmanCode {
+    val id: Long
+    data class Spool(override val id: Long) : SpoolmanCode
+    data class Filament(override val id: Long) : SpoolmanCode
+}
+
 /**
- * The spool identifier Spoolman puts in its own label QR codes, reused as the NDEF URI on
- * NTAG215 stickers so a sticker, a Spoolman QR label and a labelito label all carry the same string.
+ * Spoolman's label codes, mirroring its own parser (client_v2/src/lib/utils/spoolCode.ts):
  *
- * Spoolman 0.26.1 generates `WEB+SPOOLMAN:S-<id>` in upper case (client/src/pages/printing/
- * spoolQrCodePrintingDialog.tsx; upper case keeps a QR code in alphanumeric mode) and its scanner
- * accepts it case-insensitively, plus `http(s)://<host>/spool/show/<id>` when the "use HTTP URL"
- * print option is on (client/src/components/qrCodeScanner.tsx). We write the default form and read both.
+ * - scheme: `WEB+SPOOLMAN:S-<id>` (spool) / `WEB+SPOOLMAN:F-<id>` (filament), any case. Spoolman
+ *   0.26.1 prints the upper-case form by default. Labels and stickers made by earlier versions of
+ *   this app carry it too, so it's still accepted everywhere (in-app scanner, NFC).
+ * - url: `http(s)://<host>[/<base path>]/spool/show/<id>` or `/filament/show/<id>`.
+ *
+ * New labels and stickers use the url form ([forSpool]): the stock camera only offers to open
+ * http(s) links, Android App Links route them into this app, and a phone without the app lands on
+ * the spool's page in Spoolman's web UI.
  */
 object SpoolUri {
-    const val PREFIX = "WEB+SPOOLMAN:S-"
+    const val LEGACY_PREFIX = "WEB+SPOOLMAN:S-"
 
-    private val schemeForm = Regex("^web\\+spoolman:s-([0-9]+)$", RegexOption.IGNORE_CASE)
-    // Spoolman's scanner requires the URL to be host + /spool/show/<id>; we also tolerate a
-    // base path (Spoolman behind a sub-path) and a trailing slash.
-    private val urlForm = Regex("^https?://[^/]+(?:/[^?#]*)?/spool/show/([0-9]+)/?$", RegexOption.IGNORE_CASE)
+    private val schemeForm = Regex("^web\\+spoolman:([sf])-([0-9]+)$", RegexOption.IGNORE_CASE)
+    // Host, optional base path, /spool|filament/show/<id>, optional trailing slash, query or fragment.
+    private val urlForm = Regex(
+        "^https?://[^/?#]+(?:/[^/?#]+)*/(spool|filament)/show/([0-9]+)/?(?:[?#].*)?$",
+        RegexOption.IGNORE_CASE,
+    )
 
-    fun forSpool(id: Long): String = "$PREFIX$id"
+    /** `<Spoolman base URL>/spool/show/<id>`; [baseUrl] may or may not end with a slash. */
+    fun forSpool(baseUrl: String, id: Long): String = "${baseUrl.trim().trimEnd('/')}/spool/show/$id"
 
-    /** Returns the Spoolman spool id encoded in [value], or null if it is not a Spoolman spool code. */
-    fun parse(value: String): Long? {
-        val trimmed = value.trim()
-        val match = schemeForm.matchEntire(trimmed) ?: urlForm.matchEntire(trimmed) ?: return null
-        return match.groupValues[1].toLongOrNull()
+    /** The compact form Spoolman 0.26.1 prints by default. Only parsed now, no longer written. */
+    fun legacyForSpool(id: Long): String = "$LEGACY_PREFIX$id"
+
+    /** The Spoolman entity [value] points at, or null when it isn't a Spoolman code. */
+    fun parseCode(value: String): SpoolmanCode? {
+        val text = value.trim()
+        schemeForm.matchEntire(text)?.let { m ->
+            val id = m.groupValues[2].toLongOrNull() ?: return null
+            return if (m.groupValues[1].equals("f", ignoreCase = true)) SpoolmanCode.Filament(id) else SpoolmanCode.Spool(id)
+        }
+        urlForm.matchEntire(text)?.let { m ->
+            val id = m.groupValues[2].toLongOrNull() ?: return null
+            return if (m.groupValues[1].equals("filament", ignoreCase = true)) SpoolmanCode.Filament(id) else SpoolmanCode.Spool(id)
+        }
+        return null
     }
+
+    /** The Spoolman spool id encoded in [value], or null if it is not a spool code. */
+    fun parse(value: String): Long? = (parseCode(value) as? SpoolmanCode.Spool)?.id
 }
